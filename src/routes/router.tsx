@@ -10,6 +10,7 @@ import { FriendsPage } from '@/pages/FriendsPage'
 import { GamesPage } from '@/pages/GamesPage'
 import { GameRoomPage } from '@/pages/GameRoomPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
+import { BlackjackPage } from '@/games/blackjack/pages/BlackjackPage'
 
 /**
  * Application routes.
@@ -66,6 +67,10 @@ const routes: RouteObject[] = [
           {
             path: 'room/:roomId',
             element: <GameRoomPage />,
+          },
+          {
+            path: 'room/:roomId/play',
+            element: <BlackjackPage />,
           },
         ],
       },

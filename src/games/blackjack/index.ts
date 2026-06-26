@@ -4,8 +4,7 @@ import type { IGamePlugin } from '@/types/game'
 /**
  * Blackjack game plugin.
  *
- * Phase 3: Placeholder only — enables lobby, room creation, and invitations.
- * Phase 4: Will add full Blackjack game logic (deck, hands, scoring).
+ * Phase 4: Full Blackjack game logic implemented.
  */
 export const blackjackPlugin: IGamePlugin = {
   id: 'blackjack',

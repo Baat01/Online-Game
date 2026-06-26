@@ -80,7 +80,10 @@ export function GameRoomPage() {
     setPendingLaunch(true)
     try {
       await launchGame(roomId)
-      // Phase 4: navigate to game view here
+      // Phase 4: navigate to game view
+      if (room?.gameSlug === 'blackjack') {
+        navigate(`/room/${roomId}/play`)
+      }
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to launch game.', 'error')
     } finally {
@@ -156,10 +159,17 @@ export function GameRoomPage() {
       {/* Playing / finished states */}
       {isPlaying && (
         <div className="rounded-card bg-gold-500/10 border border-gold-500/25 p-6 text-center animate-slide-up">
-          <p className="text-gold-400 font-semibold text-lg mb-1">🃏 Game in Progress</p>
-          <p className="text-sm text-slate-400">
-            Phase 4 will implement the Blackjack table here. Hang tight!
-          </p>
+          <p className="text-gold-400 font-semibold text-lg mb-3">🃏 Game in Progress</p>
+          <Button
+            variant="primary"
+            onClick={() => {
+              if (room?.gameSlug === 'blackjack') {
+                navigate(`/room/${roomId}/play`)
+              }
+            }}
+          >
+            Join Game Table
+          </Button>
         </div>
       )}
 
