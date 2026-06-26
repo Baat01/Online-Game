@@ -80,9 +80,14 @@ export function GameRoomPage() {
     setPendingLaunch(true)
     try {
       await launchGame(roomId)
-      // Phase 4: navigate to game view
-      if (room?.gameSlug === 'blackjack') {
-        navigate(`/room/${roomId}/play`)
+      // Phase 4/5: navigate to game view
+      if (room?.gameSlug) {
+        if (room.gameSlug === 'blackjack') {
+          // Backward compatibility for existing hardcoded route
+          navigate(`/room/${roomId}/play`)
+        } else {
+          navigate(`/room/${roomId}/play/${room.gameSlug}`)
+        }
       }
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to launch game.', 'error')
@@ -163,8 +168,12 @@ export function GameRoomPage() {
           <Button
             variant="primary"
             onClick={() => {
-              if (room?.gameSlug === 'blackjack') {
-                navigate(`/room/${roomId}/play`)
+              if (room?.gameSlug) {
+                if (room.gameSlug === 'blackjack') {
+                  navigate(`/room/${roomId}/play`)
+                } else {
+                  navigate(`/room/${roomId}/play/${room.gameSlug}`)
+                }
               }
             }}
           >

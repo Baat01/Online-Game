@@ -133,6 +133,7 @@ export interface Database {
           max_players: number
           created_at: string
           started_at: string | null
+          metadata: Json
         }
         Insert: {
           id?: string
@@ -142,11 +143,107 @@ export interface Database {
           max_players?: number
           created_at?: string
           started_at?: string | null
+          metadata?: Json
         }
         Update: {
           state?: RoomState
           max_players?: number
           started_at?: string | null
+          metadata?: Json
+        }
+      }
+      game_events: {
+        Row: {
+          id: string
+          room_id: string
+          user_id: string | null
+          type: string
+          payload: Json
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          room_id: string
+          user_id?: string | null
+          type: string
+          payload?: Json
+          created_at?: string
+        }
+        Update: {
+          type?: string
+          payload?: Json
+        }
+      }
+      game_history: {
+        Row: {
+          id: string
+          room_id: string
+          game_slug: string
+          players: Json
+          winner_id: string | null
+          duration: number | null
+          started_at: string | null
+          ended_at: string
+        }
+        Insert: {
+          id?: string
+          room_id: string
+          game_slug: string
+          players: Json
+          winner_id?: string | null
+          duration?: number | null
+          started_at?: string | null
+          ended_at?: string
+        }
+        Update: {
+          winner_id?: string | null
+        }
+      }
+      rankings: {
+        Row: {
+          id: string
+          user_id: string
+          game_slug: string
+          rating: number
+          wins: number
+          losses: number
+          draws: number
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          game_slug: string
+          rating?: number
+          wins?: number
+          losses?: number
+          draws?: number
+        }
+        Update: {
+          rating?: number
+          wins?: number
+          losses?: number
+          draws?: number
+        }
+      }
+      notifications: {
+        Row: {
+          id: string
+          user_id: string
+          type: string
+          payload: Json
+          read: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          type: string
+          payload?: Json
+          read?: boolean
+          created_at?: string
+        }
+        Update: {
+          read?: boolean
         }
       }
       room_players: {

@@ -11,6 +11,10 @@ import { GamesPage } from '@/pages/GamesPage'
 import { GameRoomPage } from '@/pages/GameRoomPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { BlackjackPage } from '@/games/blackjack/pages/BlackjackPage'
+import { SavingThrowPage } from '@/games/saving-throw/pages/SavingThrowPage'
+import { BlackjackTwistPage } from '@/games/blackjack-twist/pages/BlackjackTwistPage'
+import { FourSeasonsPage } from '@/games/four-seasons/pages/FourSeasonsPage'
+import { ReplayPage } from '@/platform/replay/pages/ReplayPage'
 
 /**
  * Application routes.
@@ -70,9 +74,29 @@ const routes: RouteObject[] = [
           },
           {
             path: 'room/:roomId/play',
+            element: <BlackjackPage />, // Fallback for existing blackjack path
+          },
+          {
+            path: 'room/:roomId/play/blackjack',
             element: <BlackjackPage />,
           },
+          {
+            path: 'room/:roomId/play/saving-throw',
+            element: <SavingThrowPage />,
+          },
+          {
+            path: 'room/:roomId/play/blackjack-twist',
+            element: <BlackjackTwistPage />,
+          },
+          {
+            path: 'room/:roomId/play/four-seasons',
+            element: <FourSeasonsPage />,
+          },
         ],
+      },
+      {
+        path: 'replay/:roomId',
+        element: <ReplayPage />,
       },
 
       // ── Fallback ───────────────────────────────────────

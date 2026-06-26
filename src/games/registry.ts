@@ -12,8 +12,16 @@
 
 import type { IGamePlugin } from '@/types/game'
 import { blackjackPlugin } from './blackjack'
+import { savingThrowPlugin } from './saving-throw'
+import { blackjackTwistPlugin } from './blackjack-twist'
+import { fourSeasonsPlugin } from './four-seasons'
 
-export const GAME_REGISTRY: IGamePlugin[] = [blackjackPlugin]
+export const GAME_REGISTRY: IGamePlugin[] = [
+  blackjackPlugin,
+  savingThrowPlugin,
+  blackjackTwistPlugin,
+  fourSeasonsPlugin
+]
 
 /**
  * Find a game plugin by its unique id.

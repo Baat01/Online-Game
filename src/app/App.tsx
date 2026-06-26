@@ -3,6 +3,7 @@ import { RouterProvider } from 'react-router-dom'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { ToastProvider } from '@/components/ui/Toast'
 import { router } from '@/routes/router'
+import { GlobalNotificationListener } from '@/platform/notifications/GlobalNotificationListener'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -24,6 +25,7 @@ export function App() {
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
         <AuthProvider>
+          <GlobalNotificationListener />
           <RouterProvider router={router} />
         </AuthProvider>
       </ToastProvider>
