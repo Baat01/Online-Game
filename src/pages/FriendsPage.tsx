@@ -1,8 +1,9 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Users, Clock, Search, UserPlus } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useFriends } from '@/hooks/useFriends'
+import { usePresence } from '@/hooks/usePresence'
 import { useToast } from '@/components/ui/Toast'
 import { FriendCard } from '@/components/friends/FriendCard'
 import { IncomingRequestCard, OutgoingRequestCard } from '@/components/friends/RequestCard'
@@ -31,7 +32,7 @@ const TABS: { id: Tab; label: string; icon: typeof Users }[] = [
  * Friends page — /friends (protected).
  *
  * Three tabs (persisted in URL via ?tab=):
- * 1. Friends — friend list with remove action
+ * 1. Friends — sorted online-first, presence dots, remove action
  * 2. Requests — incoming (accept/reject) + outgoing (cancel)
  * 3. Discover — user search with add action
  */
@@ -59,9 +60,25 @@ export function FriendsPage() {
     clearSearch,
   } = useFriends()
 
+  // ── Presence ──────────────────────────────────────────────────────────────
+  const friendIds = useMemo(() => friends.map((f) => f.friendId), [friends])
+  const { isOnline, lastSeen, isLoading: isPresenceLoading } = usePresence(friendIds)
+
+  // Sort: online friends first, then alphabetical by display name
+  const sortedFriends = useMemo(() => {
+    return [...friends].sort((a, b) => {
+      const aOnline = isOnline(a.friendId) ? 1 : 0
+      const bOnline = isOnline(b.friendId) ? 1 : 0
+      if (aOnline !== bOnline) return bOnline - aOnline
+      const aName = (a.profile.display_name ?? a.profile.username).toLowerCase()
+      const bName = (b.profile.display_name ?? b.profile.username).toLowerCase()
+      return aName.localeCompare(bName)
+    })
+  }, [friends, isOnline])
+
   const { toast } = useToast()
 
-  // ── Pending mutation targets (to show loading on individual buttons) ───────
+  // ── Pending mutation targets (individual button loading states) ───────────
   const [pendingAccept, setPendingAccept] = useState<string | null>(null)
   const [pendingReject, setPendingReject] = useState<string | null>(null)
   const [pendingCancel, setPendingCancel] = useState<string | null>(null)
@@ -144,6 +161,8 @@ export function FriendsPage() {
     }
   }
 
+  const isFriendsLoading = isLoading || isPresenceLoading
+
   // ─────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────
@@ -203,9 +222,9 @@ export function FriendsPage() {
         aria-labelledby="tab-friends"
         hidden={activeTab !== 'friends'}
       >
-        {isLoading ? (
+        {isFriendsLoading ? (
           <FriendsSkeleton />
-        ) : friends.length === 0 ? (
+        ) : sortedFriends.length === 0 ? (
           <EmptyState
             icon={<Users className="size-12" />}
             title="No friends yet"
@@ -214,14 +233,16 @@ export function FriendsPage() {
         ) : (
           <div className="flex flex-col gap-2">
             <p className="text-xs text-slate-500 mb-1">
-              {friends.length} {friends.length === 1 ? 'friend' : 'friends'}
+              {sortedFriends.length} {sortedFriends.length === 1 ? 'friend' : 'friends'}
             </p>
-            {friends.map((friend) => (
+            {sortedFriends.map((friend) => (
               <FriendCard
                 key={friend.id}
                 friend={friend}
                 isRemoving={pendingRemove === friend.friendId}
                 onRemove={handleRemove}
+                isOnline={isOnline(friend.friendId)}
+                lastSeen={lastSeen(friend.friendId)}
               />
             ))}
           </div>

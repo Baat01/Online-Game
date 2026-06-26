@@ -47,6 +47,22 @@ vi.mock('@/components/ui/Toast', () => ({
   useToast: () => ({ toast: mockToast }),
 }))
 
+// ── Mock usePresence ─────────────────────────────────────────────────────────
+
+vi.mock('@/hooks/usePresence', () => ({
+  usePresence: () => ({
+    presenceMap: new Map(),
+    isOnline: () => false,
+    lastSeen: () => null,
+    isLoading: false,
+    refresh: vi.fn(),
+  }),
+  presenceKeys: {
+    all: ['presence'],
+    list: (ids: string) => ['presence', 'list', ids],
+  },
+}))
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { FriendsPage } from '@/pages/FriendsPage'

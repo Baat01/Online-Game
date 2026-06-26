@@ -8,6 +8,7 @@ import { useToast } from '@/components/ui/Toast'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { friendKeys } from '@/hooks/useFriends'
+import { useSelfPresence } from '@/hooks/useSelfPresence'
 import type { FriendRequest } from '@/types/friends'
 
 const navLinks = [
@@ -26,6 +27,9 @@ export function RootLayout() {
   const { toast } = useToast()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+
+  // Manage self-presence: go online when logged in, offline on logout/unmount
+  useSelfPresence()
 
   // Read incoming request count from cache (populated when FriendsPage is visited)
   const incomingCount = user
@@ -112,21 +116,28 @@ export function RootLayout() {
                   className="hidden sm:flex items-center gap-2 px-2 py-1 rounded-btn bg-surface-700 border border-surface-600 no-underline hover:border-brand-500/60 transition-colors"
                   aria-label="View your profile"
                 >
-                  {/* Avatar circle */}
-                  {profile?.avatar_url ? (
-                    <img
-                      src={profile.avatar_url}
-                      alt={profile.username}
-                      className="size-5 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div
+                  {/* Avatar circle with presence dot */}
+                  <div className="relative">
+                    {profile?.avatar_url ? (
+                      <img
+                        src={profile.avatar_url}
+                        alt={profile.username}
+                        className="size-5 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div
+                        aria-hidden="true"
+                        className="size-5 rounded-full bg-brand-500/30 flex items-center justify-center text-brand-300 text-xs font-bold"
+                      >
+                        {(profile?.username ?? user.email)[0].toUpperCase()}
+                      </div>
+                    )}
+                    {/* Online indicator dot */}
+                    <span
                       aria-hidden="true"
-                      className="size-5 rounded-full bg-brand-500/30 flex items-center justify-center text-brand-300 text-xs font-bold"
-                    >
-                      {(profile?.username ?? user.email)[0].toUpperCase()}
-                    </div>
-                  )}
+                      className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-brand-400 border border-surface-700"
+                    />
+                  </div>
                   <span className="text-sm text-slate-200 font-medium max-w-24 truncate">
                     {profile?.username ?? user.email}
                   </span>
