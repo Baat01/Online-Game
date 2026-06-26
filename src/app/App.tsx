@@ -1,5 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from 'react-router-dom'
+import { AuthProvider } from '@/contexts/AuthContext'
+import { ToastProvider } from '@/components/ui/Toast'
 import { router } from '@/routes/router'
 
 const queryClient = new QueryClient({
@@ -14,12 +16,17 @@ const queryClient = new QueryClient({
 
 /**
  * Root application component.
- * Provides React Query client and React Router to the entire tree.
+ * Provider order: QueryClient → Toast → Auth → Router
+ * Add new global providers here, never in individual pages.
  */
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <ToastProvider>
+        <AuthProvider>
+          <RouterProvider router={router} />
+        </AuthProvider>
+      </ToastProvider>
     </QueryClientProvider>
   )
 }

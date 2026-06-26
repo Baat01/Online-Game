@@ -27,6 +27,8 @@ export interface Database {
         Row: {
           id: string
           username: string
+          display_name: string | null
+          bio: string | null
           avatar_url: string | null
           is_online: boolean
           last_seen: string
@@ -36,6 +38,8 @@ export interface Database {
         Insert: {
           id: string
           username: string
+          display_name?: string | null
+          bio?: string | null
           avatar_url?: string | null
           is_online?: boolean
           last_seen?: string
@@ -43,8 +47,9 @@ export interface Database {
           updated_at?: string
         }
         Update: {
-          id?: string
           username?: string
+          display_name?: string | null
+          bio?: string | null
           avatar_url?: string | null
           is_online?: boolean
           last_seen?: string
@@ -137,6 +142,22 @@ export interface Database {
           created_at?: string
         }
         Update: never
+      }
+      presence: {
+        Row: {
+          user_id: string
+          is_online: boolean
+          last_seen: string
+        }
+        Insert: {
+          user_id: string
+          is_online?: boolean
+          last_seen?: string
+        }
+        Update: {
+          is_online?: boolean
+          last_seen?: string
+        }
       }
     }
     Views: Record<string, never>

@@ -1,8 +1,11 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { clsx } from 'clsx'
-import { Spade, Home, Users, Gamepad2, Moon, Sun } from 'lucide-react'
+import { Spade, Home, Users, Gamepad2, Moon, Sun, LogIn, UserPlus, LogOut } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
+import { useAuth } from '@/hooks/useAuth'
+import { useToast } from '@/components/ui/Toast'
 import { Button } from '@/components/ui/Button'
+import { Spinner } from '@/components/ui/Spinner'
 
 const navLinks = [
   { to: '/', label: 'Home', icon: Home, end: true },
@@ -12,10 +15,19 @@ const navLinks = [
 
 /**
  * Root layout — wraps every page with the top navigation bar.
- * Uses React Router's <Outlet /> to render child routes.
+ * Auth-aware: shows login/register or user menu depending on session.
  */
 export function RootLayout() {
   const { isDark, toggleTheme } = useTheme()
+  const { user, profile, loading, logout } = useAuth()
+  const { toast } = useToast()
+  const navigate = useNavigate()
+
+  const handleLogout = async () => {
+    await logout()
+    toast('You have been signed out.', 'info')
+    navigate('/login', { replace: true })
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-surface-900">
@@ -60,6 +72,7 @@ export function RootLayout() {
 
           {/* Right-side actions */}
           <div className="flex items-center gap-2">
+            {/* Theme toggle */}
             <Button
               id="theme-toggle"
               variant="ghost"
@@ -73,6 +86,73 @@ export function RootLayout() {
                 <Moon className="size-4" aria-hidden="true" />
               )}
             </Button>
+
+            {/* Auth actions */}
+            {loading ? (
+              <Spinner size="sm" />
+            ) : user ? (
+              /* Logged-in user chip — clicking goes to /profile */
+              <div className="flex items-center gap-2">
+                <NavLink
+                  to="/profile"
+                  className="hidden sm:flex items-center gap-2 px-2 py-1 rounded-btn bg-surface-700 border border-surface-600 no-underline hover:border-brand-500/60 transition-colors"
+                  aria-label="View your profile"
+                >
+                  {/* Avatar circle */}
+                  {profile?.avatar_url ? (
+                    <img
+                      src={profile.avatar_url}
+                      alt={profile.username}
+                      className="size-5 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div
+                      aria-hidden="true"
+                      className="size-5 rounded-full bg-brand-500/30 flex items-center justify-center text-brand-300 text-xs font-bold"
+                    >
+                      {(profile?.username ?? user.email)[0].toUpperCase()}
+                    </div>
+                  )}
+                  <span className="text-sm text-slate-200 font-medium max-w-24 truncate">
+                    {profile?.username ?? user.email}
+                  </span>
+                </NavLink>
+                <Button
+                  id="nav-logout"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleLogout}
+                  leftIcon={<LogOut className="size-3.5" />}
+                  aria-label="Sign out"
+                >
+                  <span className="hidden sm:inline">Sign out</span>
+                </Button>
+              </div>
+            ) : (
+              /* Guest buttons */
+              <div className="flex items-center gap-1.5">
+                <NavLink to="/login" className="no-underline">
+                  <Button
+                    id="nav-login"
+                    variant="ghost"
+                    size="sm"
+                    leftIcon={<LogIn className="size-3.5" />}
+                  >
+                    <span className="hidden sm:inline">Sign in</span>
+                  </Button>
+                </NavLink>
+                <NavLink to="/register" className="no-underline">
+                  <Button
+                    id="nav-register"
+                    variant="primary"
+                    size="sm"
+                    leftIcon={<UserPlus className="size-3.5" />}
+                  >
+                    <span className="hidden sm:inline">Register</span>
+                  </Button>
+                </NavLink>
+              </div>
+            )}
           </div>
         </nav>
 
