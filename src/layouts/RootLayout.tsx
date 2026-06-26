@@ -8,8 +8,10 @@ import { useToast } from '@/components/ui/Toast'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { friendKeys } from '@/hooks/useFriends'
+import { lobbyKeys } from '@/hooks/useLobby'
 import { useSelfPresence } from '@/hooks/useSelfPresence'
 import type { FriendRequest } from '@/types/friends'
+import type { GameInvitation } from '@/types/lobby'
 
 const navLinks = [
   { to: '/', label: 'Home', icon: Home, end: true },
@@ -34,6 +36,11 @@ export function RootLayout() {
   // Read incoming request count from cache (populated when FriendsPage is visited)
   const incomingCount = user
     ? (queryClient.getQueryData<FriendRequest[]>(friendKeys.incoming(user.id)) ?? []).length
+    : 0
+
+  // Read pending invitation count from cache (populated when GamesPage is visited / realtime fires)
+  const inviteCount = user
+    ? (queryClient.getQueryData<GameInvitation[]>(lobbyKeys.invites(user.id)) ?? []).length
     : 0
 
   const handleLogout = async () => {
@@ -81,6 +88,11 @@ export function RootLayout() {
                   {to === '/friends' && incomingCount > 0 && (
                     <span className="ml-0.5 min-w-[1.125rem] h-[1.125rem] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
                       {incomingCount > 9 ? '9+' : incomingCount}
+                    </span>
+                  )}
+                  {to === '/games' && inviteCount > 0 && (
+                    <span className="ml-0.5 min-w-[1.125rem] h-[1.125rem] px-1 rounded-full bg-brand-500 text-white text-[10px] font-bold flex items-center justify-center">
+                      {inviteCount > 9 ? '9+' : inviteCount}
                     </span>
                   )}
                 </NavLink>

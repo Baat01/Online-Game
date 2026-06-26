@@ -1,5 +1,5 @@
 /**
- * Game Registry
+ * Game Registry — Phase 3 activated.
  *
  * This is the single source of truth for all available games.
  * To add a new game:
@@ -11,12 +11,9 @@
  */
 
 import type { IGamePlugin } from '@/types/game'
+import { blackjackPlugin } from './blackjack'
 
-// Phase 3: import blackjackPlugin from './blackjack'
-
-export const GAME_REGISTRY: IGamePlugin[] = [
-  // blackjackPlugin, ← will be added in Phase 3
-]
+export const GAME_REGISTRY: IGamePlugin[] = [blackjackPlugin]
 
 /**
  * Find a game plugin by its unique id.

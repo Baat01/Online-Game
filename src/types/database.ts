@@ -18,6 +18,10 @@ export type GameStatus =
   | 'result'
   | 'reset'
 
+export type RoomState = 'waiting' | 'ready' | 'playing' | 'finished' | 'cancelled'
+
+export type InvitationStatus = 'pending' | 'accepted' | 'declined' | 'expired' | 'cancelled'
+
 export type FriendStatus = 'pending' | 'accepted' | 'rejected' | 'cancelled'
 
 export interface Database {
@@ -93,54 +97,99 @@ export interface Database {
           updated_at?: string
         }
       }
+      game_catalog: {
+        Row: {
+          id: string
+          slug: string
+          name: string
+          description: string
+          min_players: number
+          max_players: number
+          enabled: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          slug: string
+          name: string
+          description?: string
+          min_players?: number
+          max_players?: number
+          enabled?: boolean
+          created_at?: string
+        }
+        Update: {
+          name?: string
+          description?: string
+          enabled?: boolean
+        }
+      }
       game_rooms: {
         Row: {
           id: string
-          game_type: string
-          status: GameStatus
+          game_slug: string
           host_id: string
+          state: RoomState
           max_players: number
-          current_players: number
-          metadata: Json
           created_at: string
-          updated_at: string
+          started_at: string | null
         }
         Insert: {
           id?: string
-          game_type: string
-          status?: GameStatus
+          game_slug: string
           host_id: string
+          state?: RoomState
           max_players?: number
-          current_players?: number
-          metadata?: Json
           created_at?: string
-          updated_at?: string
+          started_at?: string | null
         }
         Update: {
-          status?: GameStatus
-          current_players?: number
-          metadata?: Json
-          updated_at?: string
+          state?: RoomState
+          max_players?: number
+          started_at?: string | null
         }
       }
-      game_events: {
+      room_players: {
+        Row: {
+          room_id: string
+          user_id: string
+          joined_at: string
+          ready: boolean
+        }
+        Insert: {
+          room_id: string
+          user_id: string
+          joined_at?: string
+          ready?: boolean
+        }
+        Update: {
+          ready?: boolean
+        }
+      }
+      game_invitations: {
         Row: {
           id: string
-          room_id: string
-          type: string
-          payload: Json
-          created_by: string | null
+          sender_id: string
+          receiver_id: string
+          game_slug: string
+          room_id: string | null
+          status: InvitationStatus
           created_at: string
+          expires_at: string
         }
         Insert: {
           id?: string
-          room_id: string
-          type: string
-          payload: Json
-          created_by?: string | null
+          sender_id: string
+          receiver_id: string
+          game_slug: string
+          room_id?: string | null
+          status?: InvitationStatus
           created_at?: string
+          expires_at?: string
         }
-        Update: never
+        Update: {
+          status?: InvitationStatus
+        }
       }
       presence: {
         Row: {
