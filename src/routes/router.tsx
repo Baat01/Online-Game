@@ -6,6 +6,7 @@ import { HomePage } from '@/pages/HomePage'
 import { LoginPage } from '@/pages/LoginPage'
 import { RegisterPage } from '@/pages/RegisterPage'
 import { ProfilePage } from '@/pages/ProfilePage'
+ import { FriendsPage } from '@/pages/FriendsPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { ComingSoonPage } from '@/pages/ComingSoonPage'
 
@@ -50,7 +51,7 @@ const routes: RouteObject[] = [
         children: [
           {
             path: 'friends',
-            element: <ComingSoonPage feature="Friends" />,
+            element: <FriendsPage />,
           },
           {
             path: 'profile',

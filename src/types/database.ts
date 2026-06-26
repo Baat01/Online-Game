@@ -18,7 +18,7 @@ export type GameStatus =
   | 'result'
   | 'reset'
 
-export type FriendStatus = 'pending' | 'accepted' | 'blocked'
+export type FriendStatus = 'pending' | 'accepted' | 'rejected' | 'cancelled'
 
 export interface Database {
   public: {
@@ -61,37 +61,36 @@ export interface Database {
           id: string
           user_id: string
           friend_id: string
-          status: FriendStatus
           created_at: string
         }
         Insert: {
           id?: string
           user_id: string
           friend_id: string
-          status?: FriendStatus
           created_at?: string
         }
-        Update: {
-          status?: FriendStatus
-        }
+        Update: Record<string, never>
       }
       friend_requests: {
         Row: {
           id: string
-          from_id: string
-          to_id: string
+          sender_id: string
+          receiver_id: string
           status: FriendStatus
           created_at: string
+          updated_at: string
         }
         Insert: {
           id?: string
-          from_id: string
-          to_id: string
+          sender_id: string
+          receiver_id: string
           status?: FriendStatus
           created_at?: string
+          updated_at?: string
         }
         Update: {
           status?: FriendStatus
+          updated_at?: string
         }
       }
       game_rooms: {

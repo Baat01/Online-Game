@@ -1,11 +1,14 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { clsx } from 'clsx'
 import { Spade, Home, Users, Gamepad2, Moon, Sun, LogIn, UserPlus, LogOut } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useTheme } from '@/hooks/useTheme'
 import { useAuth } from '@/hooks/useAuth'
 import { useToast } from '@/components/ui/Toast'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
+import { friendKeys } from '@/hooks/useFriends'
+import type { FriendRequest } from '@/types/friends'
 
 const navLinks = [
   { to: '/', label: 'Home', icon: Home, end: true },
@@ -22,6 +25,12 @@ export function RootLayout() {
   const { user, profile, loading, logout } = useAuth()
   const { toast } = useToast()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+
+  // Read incoming request count from cache (populated when FriendsPage is visited)
+  const incomingCount = user
+    ? (queryClient.getQueryData<FriendRequest[]>(friendKeys.incoming(user.id)) ?? []).length
+    : 0
 
   const handleLogout = async () => {
     await logout()
@@ -65,6 +74,11 @@ export function RootLayout() {
                 >
                   <Icon className="size-4" aria-hidden="true" />
                   {label}
+                  {to === '/friends' && incomingCount > 0 && (
+                    <span className="ml-0.5 min-w-[1.125rem] h-[1.125rem] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                      {incomingCount > 9 ? '9+' : incomingCount}
+                    </span>
+                  )}
                 </NavLink>
               </li>
             ))}
@@ -174,7 +188,14 @@ export function RootLayout() {
                 )
               }
             >
-              <Icon className="size-5" aria-hidden="true" />
+              <div className="relative">
+                <Icon className="size-5" aria-hidden="true" />
+                {to === '/friends' && incomingCount > 0 && (
+                  <span className="absolute -top-1 -right-1.5 min-w-[0.875rem] h-3.5 px-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
+                    {incomingCount > 9 ? '9+' : incomingCount}
+                  </span>
+                )}
+              </div>
               {label}
             </NavLink>
           ))}
