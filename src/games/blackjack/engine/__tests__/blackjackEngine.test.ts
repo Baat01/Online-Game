@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createDeck, shuffle, calculateScore, canHit, canStand, deal, nextTurn, dealerPlay, settle, reset } from '../blackjackEngine'
+import { createDeck, shuffle, calculateScore, deal } from '../blackjackEngine'
 import type { BlackjackGame, BlackjackPlayer } from '../../types/blackjack'
 
 describe('Blackjack Engine', () => {

@@ -34,7 +34,7 @@ export function useBlackjackRealtime(roomId: string, gameId?: string) {
       channel.on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'blackjack_actions', filter: `game_id=eq.${gameId}` },
-        (payload) => {
+        (_payload) => {
           // Could trigger animations here based on payload.new.type
           invalidate()
         }

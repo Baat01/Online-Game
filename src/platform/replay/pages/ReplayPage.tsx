@@ -1,8 +1,8 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ReplayEngine, GameEvent } from '../replayEngine'
+import { ReplayEngine } from '../replayEngine'
 import { Button } from '@/components/ui/Button'
-import { Loader2, Play, Pause, SkipBack, SkipForward, FastForward, Rewind } from 'lucide-react'
+import { Loader2, Play, Pause, SkipBack, SkipForward } from 'lucide-react'
 
 export function ReplayPage() {
   const { roomId } = useParams<{ roomId: string }>()

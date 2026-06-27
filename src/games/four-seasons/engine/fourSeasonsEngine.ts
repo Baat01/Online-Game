@@ -1,4 +1,5 @@
-import { Card, createStandardDeck, shuffleDeck, drawCards, Suit } from '../../_shared/deck';
+import type { Card, Suit } from '../../_shared/deck';
+import { createStandardDeck, shuffleDeck, drawCards } from '../../_shared/deck';
 import { getNextTurn } from '../../_shared/turns';
 import type { BaseGameState } from '@/types/game';
 

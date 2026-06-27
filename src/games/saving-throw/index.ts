@@ -13,7 +13,7 @@ export const savingThrowPlugin: IGamePlugin = {
   coverImage: '/games/saving-throw.jpg',
   isAvailable: true,
 
-  createRoom: (hostId: string, maxPlayers: number) => {
+  createRoom: (_hostId, _maxPlayers) => {
     return {}
   },
   

@@ -13,7 +13,7 @@ export const blackjackTwistPlugin: IGamePlugin = {
   coverImage: '/games/blackjack-twist.jpg',
   isAvailable: true,
 
-  createRoom: (hostId: string, maxPlayers: number) => {
+  createRoom: (_hostId, _maxPlayers) => {
     return {}
   },
   

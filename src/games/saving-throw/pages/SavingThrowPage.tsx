@@ -1,18 +1,15 @@
-import { useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
-import { useRoom } from '@/hooks/useLobby'
-import { useGenericGame } from '../_shared/useGenericGame'
-import { SavingThrowState, rollTwoD10, combineDice, resolveRound, checkWinner, nextRole, handleTiebreak } from './engine/savingThrowEngine'
+import { useGenericGame } from '../../_shared/useGenericGame'
+import { rollTwoD10, combineDice, resolveRound, checkWinner, nextRole } from '../engine/savingThrowEngine'
+import type { SavingThrowState, SavingThrowPlayer } from '../engine/savingThrowEngine'
 import { Button } from '@/components/ui/Button'
-import { Loader2 } from 'lucide-react'
 
 export function SavingThrowPage() {
   const { roomId } = useParams<{ roomId: string }>()
   const navigate = useNavigate()
   const { user } = useAuth()
   
-  const { data: room, isLoading: roomLoading } = useRoom(roomId ?? '')
   const { gameState, isHost, updateGameState, emitEvent, isUpdating } = useGenericGame<SavingThrowState>(roomId ?? '')
 
   if (!roomId) {
@@ -20,12 +17,9 @@ export function SavingThrowPage() {
     return null
   }
 
-  if (roomLoading) {
-    return (
-      <div className="flex h-[calc(100vh-4rem)] items-center justify-center">
-        <Loader2 className="w-10 h-10 animate-spin text-indigo-500" />
-      </div>
-    )
+  if (!roomId) {
+    navigate('/games', { replace: true })
+    return null
   }
 
   if (!gameState) {
@@ -44,9 +38,9 @@ export function SavingThrowPage() {
     const result = Math.random() < 0.5 ? 'heads' : 'tails'
     
     // The winner of the coin flip becomes 'first'
-    const otherPlayerId = Object.keys(gameState.playersRecord).find(id => id !== user.id)!
-    const firstId = choice === result ? user.id : otherPlayerId
-    const secondId = choice === result ? otherPlayerId : user.id
+    const otherPlayerId = Object.keys(gameState.playersRecord).find(id => id !== user?.id)!
+    const firstId = choice === result ? user!.id : otherPlayerId
+    const secondId = choice === result ? otherPlayerId : user!.id
 
     const newPlayersRecord = {
       ...gameState.playersRecord,
@@ -85,11 +79,11 @@ export function SavingThrowPage() {
       ...gameState,
       playersRecord: {
         ...gameState.playersRecord,
-        [user.id]: updatedPlayer
+        [user!.id]: updatedPlayer
       }
     }
     await updateGameState(newState)
-    emitEvent({ type: 'dice_rolled', payload: { userId: user.id, score, isReroll: false } })
+    emitEvent({ type: 'dice_rolled', payload: { userId: user!.id, score, isReroll: false } })
   }
 
   const handleReroll = async () => {
@@ -108,11 +102,11 @@ export function SavingThrowPage() {
       ...gameState,
       playersRecord: {
         ...gameState.playersRecord,
-        [user.id]: updatedPlayer
+        [user!.id]: updatedPlayer
       }
     }
     await updateGameState(newState)
-    emitEvent({ type: 'dice_rolled', payload: { userId: user.id, score, isReroll: true } })
+    emitEvent({ type: 'dice_rolled', payload: { userId: user!.id, score, isReroll: true } })
   }
 
   const handleKeep = async () => {
@@ -123,7 +117,7 @@ export function SavingThrowPage() {
       ...gameState,
       playersRecord: {
         ...gameState.playersRecord,
-        [user.id]: {
+        [user!.id]: {
           ...myPlayer,
           finalScore: myPlayer.score // lock it in
         }
@@ -180,7 +174,7 @@ export function SavingThrowPage() {
           <div className="text-center space-y-4">
             <h2 className="text-xl">Round {gameState.roundNumber}</h2>
             <div className="flex justify-between w-full max-w-lg gap-8 text-lg">
-              {Object.values(gameState.playersRecord).map(p => (
+              {(Object.values(gameState.playersRecord) as SavingThrowPlayer[]).map(p => (
                 <div key={p.userId} className={`p-4 rounded-lg border ${gameState.currentTurnUserId === p.userId ? 'border-indigo-500 bg-indigo-500/10' : 'border-slate-800 bg-slate-900'}`}>
                   <p className="font-semibold">{p.userId === user?.id ? 'You' : 'Opponent'} ({p.role})</p>
                   <p>Wins: {p.wins}/3</p>
@@ -216,7 +210,7 @@ export function SavingThrowPage() {
               {gameState.roundWinnerId === user?.id ? 'You won the round!' : 'Opponent won the round!'}
             </h2>
             <div className="flex justify-center gap-8 my-4">
-               {Object.values(gameState.playersRecord).map(p => (
+               {(Object.values(gameState.playersRecord) as SavingThrowPlayer[]).map(p => (
                 <div key={p.userId}>
                   <p>{p.role}</p>
                   <p className="font-mono text-xl">{p.finalScore}</p>

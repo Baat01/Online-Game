@@ -1,3 +1,5 @@
+import type { Json } from '@/types/database'
+
 export type CardSuit = 'hearts' | 'diamonds' | 'clubs' | 'spades'
 export type CardRank =
   | '2'
@@ -15,6 +17,7 @@ export type CardRank =
   | 'A'
 
 export interface Card {
+  [key: string]: Json | undefined
   suit: CardSuit
   rank: CardRank
   value: number // Standard value (J/Q/K = 10, A = 11 initially)

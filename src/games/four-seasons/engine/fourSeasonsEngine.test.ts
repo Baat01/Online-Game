@@ -5,7 +5,7 @@ import {
   playCard, 
   drawCard 
 } from './fourSeasonsEngine';
-import { Card } from '../../_shared/deck';
+import type { Card } from '../../_shared/deck';
 
 describe('Four Seasons Engine', () => {
   test('dealInitialHands sets up game correctly', () => {

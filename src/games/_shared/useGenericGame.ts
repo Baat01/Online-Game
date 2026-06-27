@@ -1,15 +1,22 @@
-import { useEffect } from 'react'
-import { useQueryClient, useMutation, useQuery } from '@tanstack/react-query'
+import { useEffect, useState, useCallback } from 'react'
+import { useQueryClient, useMutation } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { useRoom, lobbyKeys } from '@/hooks/useLobby'
 import { useAuth } from '@/hooks/useAuth'
 import { generateChecksum } from '@/platform/sync/syncEngine'
-import { toast } from 'react-hot-toast'
 
-export function useGenericGame<TState>(roomId: string) {
+export function useGenericGame<T>(roomId: string) {
   const queryClient = useQueryClient()
-  const { data: room, isLoading } = useRoom(roomId)
+  const { data: roomRaw, isLoading } = useRoom(roomId)
+  const room = roomRaw as any
   const { user } = useAuth()
+  const [gameState, setGameState] = useState<T | null>((room?.metadata as T) || null)
+
+  useEffect(() => {
+    if (room?.metadata) {
+      setGameState(room.metadata as T)
+    }
+  }, [room?.metadata])
 
   // Realtime subscription for game_events
   useEffect(() => {
@@ -20,9 +27,8 @@ export function useGenericGame<TState>(roomId: string) {
     channel.on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'game_events', filter: `room_id=eq.${roomId}` },
-      (payload) => {
+      (_payload) => {
         // Here we could trigger a callback if the game provided one
-        // e.g. onEvent(payload.new)
       }
     )
 
@@ -30,8 +36,12 @@ export function useGenericGame<TState>(roomId: string) {
       'postgres_changes',
       { event: 'UPDATE', schema: 'public', table: 'game_rooms', filter: `id=eq.${roomId}` },
       (payload) => {
+        if (payload.new && (payload.new as any).metadata) {
+          setGameState((payload.new as any).metadata as T)
+        }
+        
         // Desync detection: if the server metadata hash doesn't match our cache, trigger a refetch
-        const serverChecksum = generateChecksum(payload.new.metadata);
+        const serverChecksum = generateChecksum((payload.new as any).metadata);
         const localChecksum = generateChecksum(room?.metadata);
         
         if (serverChecksum !== localChecksum) {
@@ -64,7 +74,7 @@ export function useGenericGame<TState>(roomId: string) {
   }, [roomId, room?.metadata, queryClient])
 
   const updateStateMutation = useMutation({
-    mutationFn: async (newState: Partial<TState>) => {
+    mutationFn: async (newState: Partial<T>) => {
       if (!roomId) throw new Error('No room id')
       const merged = { ...((room?.metadata as any) || {}), ...newState }
       
@@ -85,29 +95,28 @@ export function useGenericGame<TState>(roomId: string) {
         throw error
       }
       return merged
-    },
-
-  const emitEventMutation = useMutation({
-    mutationFn: async ({ type, payload }: { type: string; payload: any }) => {
-      if (!roomId || !user) throw new Error('Missing room or user')
-      const { error } = await supabase
-        .from('game_events')
-        .insert({
-          room_id: roomId,
-          user_id: user.id,
-          type,
-          payload
-        })
-      if (error) throw error
     }
   })
 
+  const emitEvent = useCallback(async ({ type, payload }: { type: string; payload: any }) => {
+    if (!roomId || !user) throw new Error('Missing room or user')
+    const { error } = await supabase
+      .from('game_events')
+      .insert({
+        room_id: roomId,
+        user_id: user.id,
+        type,
+        payload
+      })
+    if (error) throw error
+  }, [roomId, user])
+
   return {
-    gameState: (room?.metadata as TState) || null,
+    gameState,
     isLoading,
     isHost: room?.hostId === user?.id,
     updateGameState: updateStateMutation.mutateAsync,
     isUpdating: updateStateMutation.isPending,
-    emitEvent: emitEventMutation.mutateAsync,
+    emitEvent,
   }
 }

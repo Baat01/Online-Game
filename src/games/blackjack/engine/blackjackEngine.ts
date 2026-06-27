@@ -1,4 +1,4 @@
-import type { Card, CardSuit, CardRank, BlackjackGame, BlackjackPlayer, BlackjackPlayerState } from '../types/blackjack'
+import type { Card, CardSuit, CardRank, BlackjackGame, BlackjackPlayer } from '../types/blackjack'
 
 const SUITS: CardSuit[] = ['hearts', 'diamonds', 'clubs', 'spades']
 const RANKS: CardRank[] = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']

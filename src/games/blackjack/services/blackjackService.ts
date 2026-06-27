@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase'
 import type { BlackjackGame, BlackjackPlayer, BlackjackActionType } from '../types/blackjack'
-import { deal, nextTurn, dealerPlay, settle, canHit, canStand, drawCards, calculateScore, reset } from '../engine/blackjackEngine'
+import { deal, nextTurn, dealerPlay, canHit, canStand, drawCards, calculateScore, reset } from '../engine/blackjackEngine'
 
 export const blackjackService = {
   /**
@@ -63,7 +63,7 @@ export const blackjackService = {
 
     if (playersError) throw new Error(playersError.message)
 
-    return { game: game as BlackjackGame, players: players as BlackjackPlayer[] }
+    return { game: game as unknown as BlackjackGame, players: players as unknown as BlackjackPlayer[] }
   },
 
   /**
@@ -129,10 +129,10 @@ export const blackjackService = {
     
     if (!game || !p) throw new Error('Game or player not found')
 
-    if (!canHit(p as BlackjackPlayer, game as BlackjackGame)) throw new Error('Cannot hit right now')
+    if (!canHit(p as unknown as BlackjackPlayer, game as unknown as BlackjackGame)) throw new Error('Cannot hit right now')
 
-    const draw = drawCards(game.deck, 1)
-    const newHand = [...p.hand, ...draw.drawn]
+    const draw = drawCards(game.deck as any, 1)
+    const newHand = [...(p.hand as any[]), ...draw.drawn] as any
     const newScore = calculateScore(newHand)
     const busted = newScore > 21
 
@@ -168,7 +168,7 @@ export const blackjackService = {
     const { data: p } = await supabase.from('blackjack_players').select('*').eq('game_id', gameId).eq('user_id', userId).single()
     
     if (!game || !p) throw new Error('Game or player not found')
-    if (!canStand(p as BlackjackPlayer, game as BlackjackGame)) throw new Error('Cannot stand right now')
+    if (!canStand(p as unknown as BlackjackPlayer, game as unknown as BlackjackGame)) throw new Error('Cannot stand right now')
 
     await supabase.from('blackjack_players').update({
       standing: true,
@@ -182,11 +182,11 @@ export const blackjackService = {
   /**
    * Moves turn to next player or dealer.
    */
-  private async advanceTurn(gameId: string) {
-    const { data: game } = await supabase.from('blackjack_games').select('*').eq('id', gameId).single()
+  async advanceTurn(gameId: string) {
+    await supabase.from('blackjack_games').select('*').eq('id', gameId).single()
     const { data: players } = await supabase.from('blackjack_players').select('*').eq('game_id', gameId).order('seat', { ascending: true })
 
-    const nextTurnId = nextTurn(players as BlackjackPlayer[])
+    const nextTurnId = nextTurn(players as unknown as BlackjackPlayer[])
     
     if (nextTurnId) {
       await supabase.from('blackjack_games').update({ current_turn: nextTurnId }).eq('id', gameId)
@@ -202,9 +202,9 @@ export const blackjackService = {
    */
   async runDealerTurn(gameId: string) {
     const { data: game } = await supabase.from('blackjack_games').select('*').eq('id', gameId).single()
-    if (game.status !== 'dealer_turn') return
+    if (game!.status !== 'dealer_turn') return
 
-    const playedGame = dealerPlay(game as BlackjackGame)
+    const playedGame = dealerPlay(game as unknown as BlackjackGame)
 
     await supabase.from('blackjack_games').update({
       deck: playedGame.deck,
@@ -224,7 +224,7 @@ export const blackjackService = {
     const { data: game } = await supabase.from('blackjack_games').select('*').eq('id', gameId).single()
     const { data: players } = await supabase.from('blackjack_players').select('*').eq('game_id', gameId)
 
-    const resetState = reset(game as BlackjackGame, players as BlackjackPlayer[])
+    const resetState = reset(game as unknown as BlackjackGame, players as unknown as BlackjackPlayer[])
 
     await supabase.from('blackjack_games').update({
       status: resetState.game.status,
@@ -246,7 +246,7 @@ export const blackjackService = {
       }).eq('game_id', gameId).eq('user_id', p.user_id)
     }
 
-    await this.logAction(gameId, game.current_turn || players[0].user_id, 'reset')
+    await this.logAction(gameId, game!.current_turn || players![0].user_id, 'reset')
   },
 
   async logAction(gameId: string, userId: string, type: BlackjackActionType, payload: Record<string, unknown> | null = null) {
@@ -254,7 +254,7 @@ export const blackjackService = {
       game_id: gameId,
       user_id: userId,
       type,
-      payload
+      payload: payload as any
     })
   }
 }

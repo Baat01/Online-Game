@@ -1,21 +1,19 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
-import { useRoom } from '@/hooks/useLobby'
-import { useGenericGame } from '../_shared/useGenericGame'
-import { TwistState, applyCardEffect, resolveGame, validateMove, calculateScore } from './engine/twistEngine'
-import { drawCards } from '../_shared/deck'
-import { getNextTurn } from '../_shared/turns'
+import { useGenericGame } from '../../_shared/useGenericGame'
+import type { TwistState } from '../engine/twistEngine'
+import { applyCardEffect, resolveGame, validateMove, calculateScore } from '../engine/twistEngine'
+import { drawCards } from '../../_shared/deck'
+import { getNextTurn } from '../../_shared/turns'
 import { Button } from '@/components/ui/Button'
-import { Loader2 } from 'lucide-react'
 
 export function BlackjackTwistPage() {
   const { roomId } = useParams<{ roomId: string }>()
   const navigate = useNavigate()
   const { user } = useAuth()
   
-  const { data: room, isLoading: roomLoading } = useRoom(roomId ?? '')
-  const { gameState, isHost, updateGameState, emitEvent, isUpdating } = useGenericGame<TwistState>(roomId ?? '')
+  const { gameState, updateGameState, emitEvent, isUpdating } = useGenericGame<TwistState>(roomId ?? '')
 
   const [pendingCardAction, setPendingCardAction] = useState<any>(null) // Used when drawing a face card
 
@@ -24,12 +22,9 @@ export function BlackjackTwistPage() {
     return null
   }
 
-  if (roomLoading) {
-    return (
-      <div className="flex h-[calc(100vh-4rem)] items-center justify-center">
-        <Loader2 className="w-10 h-10 animate-spin text-indigo-500" />
-      </div>
-    )
+  if (!roomId) {
+    navigate('/games', { replace: true })
+    return null
   }
 
   if (!gameState) {
@@ -52,11 +47,11 @@ export function BlackjackTwistPage() {
   }
 
   const handleDraw = async () => {
-    if (!isMyTurn || !myPlayer || pendingCardAction) return
+    if (!isMyTurn || !myPlayer || pendingCardAction || !user) return
     if (!validateMove(gameState, user.id)) return
 
-    const { remaining, drawn } = drawCards(gameState.deck, 1)
-    const card = drawn[0]
+    const deck = drawCards(gameState.deck as any, 1)
+    const card = deck.drawn[0]
 
     if (['J', 'Q', 'K'].includes(card.rank)) {
       setPendingCardAction(card)
@@ -68,7 +63,7 @@ export function BlackjackTwistPage() {
       
       let newState: TwistState = {
         ...gameState,
-        deck: remaining,
+        deck: deck.remaining,
         playersRecord: { ...gameState.playersRecord, [user.id]: targetPlayer }
       }
 
@@ -89,14 +84,14 @@ export function BlackjackTwistPage() {
     setPendingCardAction(null)
 
     // Remove card from deck
-    const { remaining, drawn } = drawCards(gameState.deck, 1) // wait, the card is already popped conceptually, but we didn't save it!
+    drawCards(gameState.deck as any, 1) // wait, the card is already popped conceptually, but we didn't save it!
     // we need to slice it
     const newDeck = gameState.deck.slice(1)
 
     let newState = { ...gameState, deck: newDeck }
 
     if (action === 'give') {
-      const opponentId = Object.keys(gameState.playersRecord).find(id => id !== user.id)!
+      const opponentId = Object.keys(gameState.playersRecord).find(id => id !== user!.id)!
       let oppPlayer = gameState.playersRecord[opponentId]
       
       oppPlayer = applyCardEffect(card, 'give', oppPlayer, kingChoice)
@@ -109,19 +104,19 @@ export function BlackjackTwistPage() {
       targetPlayer.score = calculateScore(targetPlayer.hand, gameState.sharedHiddenCard, gameState.sharedRevealed)
       if (targetPlayer.score > 21) targetPlayer.busted = true
 
-      newState.playersRecord[user.id] = targetPlayer
+      newState.playersRecord[user!.id] = targetPlayer
       if (targetPlayer.busted) {
-        newState.currentTurnUserId = getNextTurn(Object.keys(gameState.playersRecord), user.id)
+        newState.currentTurnUserId = getNextTurn(Object.keys(gameState.playersRecord), user!.id)
       }
     }
 
     newState = checkAutoStandOrBust(newState)
     await updateGameState(newState)
-    emitEvent({ type: 'play_face_card', payload: { userId: user.id, action } })
+    emitEvent({ type: 'play_face_card', payload: { userId: user!.id, action } })
   }
 
   const handleStand = async () => {
-    if (!isMyTurn || !myPlayer || pendingCardAction) return
+    if (!isMyTurn || !myPlayer || pendingCardAction || !user) return
     
     let newState: TwistState = {
       ...gameState,
@@ -157,12 +152,30 @@ export function BlackjackTwistPage() {
 
         {/* Players Area */}
         <div className="flex justify-between w-full max-w-4xl gap-8">
-          {Object.values(gameState.playersRecord).map(p => (
+          {(Object.values(gameState.playersRecord) as any[]).map((p: any) => {
+            if (p.userId === user?.id) return (
+              <div key={p.userId} className="flex-1 p-6 rounded-xl border bg-slate-900 border-slate-800">
+                <h3 className="text-xl mb-4">You {myPlayer?.busted && <span className="text-red-500">(Busted)</span>}</h3>
+                <div className="flex gap-2 flex-wrap mb-4">
+                  {myPlayer?.hand.map((c: any, i: number) => (
+                    <div key={i} className="w-12 h-16 bg-white text-black rounded shadow flex items-center justify-center font-bold relative">
+                      {c.rank}
+                      {(c as any).currentValue !== undefined && !['J','Q','K','A'].includes(c.rank) === false && (
+                        <span className="absolute text-[10px] -mt-8 text-blue-600">{(c as any).currentValue}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xl font-mono">Score: {myPlayer?.score}</p>
+                {myPlayer?.hasStood && <p className="text-sm text-green-400 mt-2">Standing</p>}
+              </div>
+            )
+            return (
             <div key={p.userId} className={`flex-1 p-6 rounded-xl border ${gameState.currentTurnUserId === p.userId ? 'border-pink-500 bg-pink-500/10' : 'border-slate-800 bg-slate-900'}`}>
-              <h3 className="text-xl mb-4">{p.userId === user?.id ? 'You' : 'Opponent'} {p.busted && <span className="text-red-500">(Busted)</span>}</h3>
+              <h3 className="text-xl mb-4">Opponent {p.busted && <span className="text-red-500">(Busted)</span>}</h3>
               <div className="flex gap-2 flex-wrap mb-4">
-                {p.hand.map((c, i) => (
-                  <div key={i} className="w-12 h-16 bg-white text-black rounded shadow flex items-center justify-center font-bold">
+                {p.hand.map((c: any, i: number) => (
+                  <div key={i} className="w-12 h-16 bg-white text-black rounded shadow flex items-center justify-center font-bold relative">
                     {c.rank}
                     {/* Visual cue for special values */}
                     {(c as any).currentValue !== undefined && !['J','Q','K','A'].includes(c.rank) === false && (
@@ -174,7 +187,8 @@ export function BlackjackTwistPage() {
               <p className="text-xl font-mono">Score: {p.score}</p>
               {p.hasStood && <p className="text-sm text-green-400 mt-2">Standing</p>}
             </div>
-          ))}
+            )
+          })}
         </div>
 
         {/* Action Bar */}

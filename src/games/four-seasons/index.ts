@@ -13,7 +13,7 @@ export const fourSeasonsPlugin: IGamePlugin = {
   coverImage: '/games/four-seasons.jpg',
   isAvailable: true,
 
-  createRoom: (hostId: string, maxPlayers: number) => {
+  createRoom: (_hostId: string, _maxPlayers: number) => {
     return {}
   },
   

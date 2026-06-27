@@ -1,5 +1,5 @@
-import { Card, createStandardDeck, shuffleDeck, drawCards } from '../../_shared/deck';
-import { getNextTurn } from '../../_shared/turns';
+import { createStandardDeck, shuffleDeck, drawCards } from '../../_shared/deck';
+import type { Card } from '../../_shared/deck';
 import type { BaseGameState } from '@/types/game';
 
 export interface TwistPlayer {

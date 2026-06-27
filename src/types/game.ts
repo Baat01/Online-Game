@@ -15,6 +15,7 @@ export type GameStatus =
   | 'dealer_turn'  // Automated/dealer phase
   | 'result'       // Round over, showing results
   | 'reset'        // Brief reset before next round
+  | 'finished'     // Game completed
 
 /** Minimal metadata every game must expose for the lobby/registry */
 export interface IGamePlugin {

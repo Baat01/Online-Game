@@ -6,7 +6,7 @@ import { markNotificationRead } from './notificationService'
 
 export function GlobalNotificationListener() {
   const { user } = useAuth()
-  const { addToast } = useToast()
+  const { toast } = useToast()
 
   useEffect(() => {
     if (!user) return
@@ -17,14 +17,13 @@ export function GlobalNotificationListener() {
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
       (payload) => {
-        const notif = payload.new
+        const notif = payload.new as any
         
         // Show toast
-        addToast({
-          title: notif.type.replace('_', ' ').toUpperCase(),
-          message: JSON.stringify(notif.payload),
-          type: 'info'
-        })
+        toast(
+          `${notif.type.replace('_', ' ').toUpperCase()}: ${JSON.stringify(notif.payload)}`,
+          'info'
+        )
         
         // Auto-mark as read for now
         markNotificationRead(notif.id).catch(console.error)
@@ -35,7 +34,7 @@ export function GlobalNotificationListener() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [user, addToast])
+  }, [user, toast])
 
   return null
 }

@@ -11,7 +11,7 @@ interface Props {
   profileMap: Record<string, { username: string; avatarUrl: string | null }>
 }
 
-export function PlayerSeat({ player, game, isMe, isMyTurn, profileMap }: Props) {
+export function PlayerSeat({ player, game, isMe, profileMap }: Props) {
   const profile = profileMap[player.user_id]
   const isTurn = game.current_turn === player.user_id
 

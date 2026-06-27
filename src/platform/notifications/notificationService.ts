@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase'
 export async function markNotificationRead(id: string) {
   const { error } = await supabase
     .from('notifications')
-    .update({ read: true })
+    .update({ read: true } as any)
     .eq('id', id)
     
   if (error) throw error
