@@ -1,4 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest'
+import fs from 'node:fs'
+import path from 'node:path'
+import * as THREE from 'three'
+import {
+  buildDieGeometryData,
+  computeTargetDieQuaternion,
+  computeCoinTargetQuaternion,
+} from '../components'
 import {
   createSeededRng,
   rollDie,
@@ -23,7 +31,10 @@ import {
   CARD_BACK_THEME_LIST,
   DICE_THEME_LIST,
   COIN_THEME_LIST,
+  GASTER_TAROT_ARCANUM,
+  ALL_UNDERTALE_TAROT_ARCANA,
   UNDERTALE_TAROT_ARCANA,
+  UNDERTALE_TAROT_BACK_IMAGE,
   UNDERTALE_TAROT_DECK_META,
   getThemePriceYen,
   getTarotArcanaForCard,
@@ -182,6 +193,50 @@ describe('deck & cardThemes', () => {
     useCardThemeStore.getState().setCoinThemeId('railgun-coin')
     expect(useCardThemeStore.getState().diceThemeId).toBe('astral-crystal')
     expect(useCardThemeStore.getState().coinThemeId).toBe('railgun-coin')
+  })
+
+  it('verifies all 22 Undertale Tarot assets + 666 Gaster + back image exist and validates Three.js 3D dice/coin math', () => {
+    const publicDir = path.resolve(process.cwd(), 'public')
+    expect(UNDERTALE_TAROT_ARCANA[6].name).toBe('Royal Guards')
+    expect(UNDERTALE_TAROT_ARCANA[10].name).toBe('Temmie')
+    expect(GASTER_TAROT_ARCANUM.number).toBe(666)
+    expect(GASTER_TAROT_ARCANUM.name).toBe('Gaster')
+    expect(ALL_UNDERTALE_TAROT_ARCANA).toHaveLength(23)
+    expect(fs.existsSync(path.join(publicDir, UNDERTALE_TAROT_BACK_IMAGE))).toBe(true)
+
+    for (const arcanum of ALL_UNDERTALE_TAROT_ARCANA) {
+      const absPath = path.join(publicDir, arcanum.imagePath)
+      expect(fs.existsSync(absPath)).toBe(true)
+      expect(fs.statSync(absPath).size).toBeGreaterThan(20000)
+    }
+
+    const expectedFaceCounts = {
+      d4: 4,
+      d6: 6,
+      d8: 8,
+      d10: 10,
+      'd10-tens': 10,
+      d12: 12,
+      d16: 16,
+      d20: 20,
+    } as const
+
+    const zForward = new THREE.Vector3(0, 0, 1)
+    for (const dieType of ['d4', 'd6', 'd8', 'd10', 'd10-tens', 'd12', 'd16', 'd20'] as const) {
+      const { geometry, faces } = buildDieGeometryData(dieType)
+      expect(faces).toHaveLength(expectedFaceCounts[dieType])
+      for (const f of faces) {
+        const q = computeTargetDieQuaternion(dieType, f.value)
+        const aligned = f.normal.clone().applyQuaternion(q)
+        expect(aligned.distanceTo(zForward)).toBeLessThan(1e-4)
+      }
+      geometry.dispose()
+    }
+
+    const qHeads = computeCoinTargetQuaternion('heads')
+    const qTails = computeCoinTargetQuaternion('tails')
+    expect(new THREE.Vector3(0, 1, 0).applyQuaternion(qHeads).distanceTo(zForward)).toBeLessThan(1e-4)
+    expect(new THREE.Vector3(0, -1, 0).applyQuaternion(qTails).distanceTo(zForward)).toBeLessThan(1e-4)
   })
 })
 

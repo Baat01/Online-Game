@@ -20,7 +20,7 @@ import {
 } from '@/services/wallet/walletService'
 import { Button } from '@/components/ui/Button'
 import {
-  UNDERTALE_TAROT_ARCANA,
+  ALL_UNDERTALE_TAROT_ARCANA,
   UNDERTALE_TAROT_DECK_META,
   isThemeUnlocked,
   useCardTheme,
@@ -90,6 +90,14 @@ export function CardThemeSelector({
   const [inspectorFlipped, setInspectorFlipped] = useState(false)
   const [inspectorRank, setInspectorRank] = useState<(typeof INSPECTOR_RANKS)[number]>('Q')
   const [inspectorTarotIdx, setInspectorTarotIdx] = useState(20) // XX Sans by default
+  const [inspectorDieType, setInspectorDieType] = useState<
+    'd4' | 'd6' | 'd8' | 'd10' | '2d10' | 'd12' | 'd16' | 'd20'
+  >('2d10')
+  const [inspectorDieValue, setInspectorDieValue] = useState<number>(20)
+  const [inspector2d10, setInspector2d10] = useState<{ tens: number; units: number }>({
+    tens: 8,
+    units: 4,
+  })
   const [rotX, setRotX] = useState(6)
   const [rotY, setRotY] = useState(-10)
   const dragRef = useRef<{ active: boolean; x: number; y: number }>({ active: false, x: 0, y: 0 })
@@ -270,6 +278,7 @@ export function CardThemeSelector({
           <div
             data-testid="inspector-3d-viewport"
             onPointerDown={(e) => {
+              if (inspectorMode === 'dice' || inspectorMode === 'coin') return
               dragRef.current = { active: true, x: e.clientX, y: e.clientY }
             }}
             onPointerMove={(e) => {
@@ -300,29 +309,54 @@ export function CardThemeSelector({
             <div
               data-testid="inspector-3d-object"
               className="relative z-10 transition-transform duration-150 ease-out"
-              style={{
-                transform: `perspective(1000px) rotateX(${rotX}deg) rotateY(${rotY}deg)`,
-                transformStyle: 'preserve-3d',
-              }}
+              style={
+                inspectorMode === 'dice' || inspectorMode === 'coin'
+                  ? undefined
+                  : {
+                      transform: `perspective(1000px) rotateX(${rotX}deg) rotateY(${rotY}deg)`,
+                      transformStyle: 'preserve-3d',
+                    }
+              }
             >
               {inspectorMode === 'dice' ? (
-                <AnimatedDice
-                  tens={8}
-                  units={4}
-                  combinedScore={84}
-                  diceThemeId={shownDiceId}
-                  rollKey={previewRollKey}
-                  size="md"
-                />
+                inspectorDieType === '2d10' ? (
+                  <AnimatedDice
+                    tens={inspector2d10.tens}
+                    units={inspector2d10.units}
+                    combinedScore={
+                      inspector2d10.tens === 0 && inspector2d10.units === 0
+                        ? 100
+                        : inspector2d10.tens * 10 + inspector2d10.units
+                    }
+                    diceThemeId={shownDiceId}
+                    rollKey={previewRollKey}
+                    size="sm"
+                  />
+                ) : (
+                  <AnimatedDice
+                    tens={null}
+                    units={null}
+                    combinedScore={inspectorDieValue}
+                    singleDieLabel={inspectorDieType.toUpperCase()}
+                    singleDieType={inspectorDieType}
+                    singleDieValue={inspectorDieValue}
+                    diceThemeId={shownDiceId}
+                    rollKey={previewRollKey}
+                    size="md"
+                  />
+                )
               ) : inspectorMode === 'coin' ? (
                 <AnimatedCoinFlip
                   choice="heads"
                   result={coinFlipResult}
                   coinThemeId={shownCoinId}
+                  flipKey={previewRollKey}
                 />
               ) : inspectorMode === 'tarot' ? (
                 <TarotArcanaCard
-                  arcanum={UNDERTALE_TAROT_ARCANA[inspectorTarotIdx] ?? UNDERTALE_TAROT_ARCANA[0]}
+                  arcanum={
+                    ALL_UNDERTALE_TAROT_ARCANA[inspectorTarotIdx] ?? ALL_UNDERTALE_TAROT_ARCANA[0]
+                  }
                   size="sm"
                   revealed={!inspectorFlipped}
                 />
@@ -428,7 +462,7 @@ export function CardThemeSelector({
                   onChange={(e) => setInspectorTarotIdx(Number(e.target.value))}
                   className="px-2 py-1 rounded-btn bg-surface-800 border border-surface-600 text-xs text-slate-100"
                 >
-                  {UNDERTALE_TAROT_ARCANA.map((arc, idx) => (
+                  {ALL_UNDERTALE_TAROT_ARCANA.map((arc, idx) => (
                     <option key={arc.number} value={idx}>
                       {arc.roman} — {arc.name} ({arc.arcanaTitle})
                     </option>
@@ -448,13 +482,67 @@ export function CardThemeSelector({
 
             {(inspectorMode === 'dice' || inspectorMode === 'coin') && (
               <div className="flex flex-wrap items-center justify-center gap-2">
+                {inspectorMode === 'dice' && (
+                  <div className="flex flex-wrap items-center justify-center gap-1">
+                    {(['d4', 'd6', 'd8', 'd10', '2d10', 'd12', 'd16', 'd20'] as const).map((dt) => (
+                      <button
+                        key={dt}
+                        type="button"
+                        onClick={() => {
+                          setInspectorDieType(dt)
+                          if (dt !== '2d10') {
+                            const maxMap = {
+                              d4: 4,
+                              d6: 6,
+                              d8: 8,
+                              d10: 9,
+                              d12: 12,
+                              d16: 16,
+                              d20: 20,
+                            }
+                            setInspectorDieValue(maxMap[dt])
+                          }
+                        }}
+                        className={clsx(
+                          'px-2 py-0.5 rounded text-[11px] font-bold uppercase border cursor-pointer',
+                          inspectorDieType === dt
+                            ? 'bg-brand-500/20 border-gold-400 text-gold-300'
+                            : 'bg-surface-800 border-surface-700 text-slate-400',
+                        )}
+                      >
+                        {dt}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <Button
                   type="button"
                   size="sm"
                   variant="secondary"
                   onClick={() => {
-                    if (inspectorMode === 'dice') setPreviewRollKey((k) => k + 1)
-                    else setCoinFlipResult((prev) => (prev === 'heads' ? 'tails' : 'heads'))
+                    setPreviewRollKey((k) => k + 1)
+                    if (inspectorMode === 'dice') {
+                      if (inspectorDieType === '2d10') {
+                        setInspector2d10({
+                          tens: Math.floor(Math.random() * 10),
+                          units: Math.floor(Math.random() * 10),
+                        })
+                      } else if (inspectorDieType === 'd10') {
+                        setInspectorDieValue(Math.floor(Math.random() * 10))
+                      } else {
+                        const maxSide = {
+                          d4: 4,
+                          d6: 6,
+                          d8: 8,
+                          d12: 12,
+                          d16: 16,
+                          d20: 20,
+                        }[inspectorDieType]
+                        setInspectorDieValue(Math.floor(Math.random() * maxSide) + 1)
+                      }
+                    } else if (inspectorMode === 'coin') {
+                      setCoinFlipResult((prev) => (prev === 'heads' ? 'tails' : 'heads'))
+                    }
                   }}
                   leftIcon={<Dices className="size-3.5" />}
                 >

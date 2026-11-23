@@ -15,6 +15,7 @@ import { BlackjackPage } from '@/games/blackjack/pages/BlackjackPage'
 import { SavingThrowPage } from '@/games/saving-throw/pages/SavingThrowPage'
 import { BlackjackTwistPage } from '@/games/blackjack-twist/pages/BlackjackTwistPage'
 import { FourSeasonsPage } from '@/games/four-seasons/pages/FourSeasonsPage'
+import { Arcane23Page } from '@/games/23e-arcane/pages/Arcane23Page'
 import { ReplayPage } from '@/platform/replay/pages/ReplayPage'
 
 /**
@@ -100,6 +101,10 @@ const routes: RouteObject[] = [
           {
             path: 'room/:roomId/play/four-seasons',
             element: <FourSeasonsPage />,
+          },
+          {
+            path: 'room/:roomId/play/23e-arcane',
+            element: <Arcane23Page />,
           },
         ],
       },

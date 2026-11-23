@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import type { UserPermissions } from '@/types/auth'
 import type { GameCatalogEntry, GameInvitation, GameRoom, RoomPlayer } from '@/types/lobby'
 import { createRoomSchema, inviteFriendSchema } from './lobbySchemas'
 
@@ -56,6 +57,7 @@ function toRoomPlayer(row: {
     avatar_url: string | null
     yen_balance?: number
     is_admin?: boolean
+    permissions?: UserPermissions | null
     clan_title?: string | null
     card_back_theme?: string
     card_front_theme?: string
@@ -190,6 +192,7 @@ export async function getRoom(roomId: string): Promise<GameRoom> {
         avatar_url,
         yen_balance,
         is_admin,
+        permissions,
         clan_title,
         card_back_theme,
         card_front_theme,

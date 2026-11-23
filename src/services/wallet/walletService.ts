@@ -1,4 +1,5 @@
-import { supabase } from '@/lib/supabase'
+import { supabase, isLocalDemoMode } from '@/lib/supabase'
+import { registerLocalAccountRecord } from '@/lib/localSupabase'
 import {
   DEFAULT_UNLOCKED_THEMES,
   SPECIAL_UNLOCKABLE_THEMES,
@@ -6,7 +7,27 @@ import {
 } from '@/games/_shared/themes'
 import type { Json } from '@/types/database'
 import type { GameRoom } from '@/types/lobby'
-import type { Profile } from '@/types/auth'
+import type { Profile, UserPermissions } from '@/types/auth'
+
+export const DEFAULT_USER_PERMISSIONS: UserPermissions = {
+  can_create_accounts: false,
+  can_grant_themes: false,
+  can_set_custom_stakes: false,
+  unlimited_yen: false,
+}
+
+export function resolveUserPermissions(
+  user?: { is_admin?: boolean; permissions?: Partial<UserPermissions> | null } | null,
+): UserPermissions {
+  const isAdmin = Boolean(user?.is_admin)
+  const p = user?.permissions
+  return {
+    can_create_accounts: p?.can_create_accounts ?? isAdmin,
+    can_grant_themes: p?.can_grant_themes ?? isAdmin,
+    can_set_custom_stakes: p?.can_set_custom_stakes ?? isAdmin,
+    unlimited_yen: p?.unlimited_yen ?? isAdmin,
+  }
+}
 
 export const PRESET_YEN_STAKES = [0, 100, 500, 1000, 5000] as const
 export const DEFAULT_YEN_BALANCE = 10000
@@ -44,6 +65,7 @@ interface RoomPlayerWithProfile {
     id: string
     yen_balance?: number
     is_admin?: boolean
+    permissions?: Partial<UserPermissions> | null
   } | null
 }
 
@@ -58,7 +80,7 @@ async function fetchRoomContext(roomId: string) {
 
   const { data: playerRows, error: playersErr } = await supabase
     .from('room_players')
-    .select('user_id, profiles!inner(id, yen_balance, is_admin)')
+    .select('user_id, profiles!inner(id, yen_balance, is_admin, permissions)')
     .eq('room_id', roomId)
 
   if (playersErr) throw playersErr
@@ -75,7 +97,7 @@ async function fetchRoomContext(roomId: string) {
 export async function setRoomStake(
   roomId: string,
   stakeYen: number,
-  caller: { id: string; is_admin?: boolean } | null,
+  caller: { id: string; is_admin?: boolean; permissions?: Partial<UserPermissions> | null } | null,
 ): Promise<{ stakeYen: number; potYen: number }> {
   const cleanStake = Math.floor(stakeYen)
   if (!Number.isFinite(cleanStake) || cleanStake < 0) {
@@ -84,19 +106,21 @@ export async function setRoomStake(
 
   const { roomRow, players, metadata } = await fetchRoomContext(roomId)
 
-  const isCallerAdmin = Boolean(caller?.is_admin)
-  if (!isCallerAdmin && roomRow.host_id !== caller?.id) {
+  const callerPerms = resolveUserPermissions(caller)
+  const canCustomStake = Boolean(caller?.is_admin || callerPerms.can_set_custom_stakes)
+  if (!canCustomStake && roomRow.host_id !== caller?.id) {
     throw new Error("Seul l'hôte ou un administrateur peut modifier la mise.")
   }
 
-  if (!isCallerAdmin) {
+  if (!canCustomStake) {
     const isPreset = (PRESET_YEN_STAKES as readonly number[]).includes(cleanStake)
     if (!isPreset) {
       throw new Error('Seul un administrateur peut définir une mise personnalisée.')
     }
     if (cleanStake > 0) {
       for (const p of players) {
-        if (!p.profiles?.is_admin && (p.profiles?.yen_balance ?? DEFAULT_YEN_BALANCE) < cleanStake) {
+        const pPerms = resolveUserPermissions(p.profiles)
+        if (!pPerms.unlimited_yen && (p.profiles?.yen_balance ?? DEFAULT_YEN_BALANCE) < cleanStake) {
           throw new Error("Solde en ¥ insuffisant pour l'un des joueurs de la salle.")
         }
       }
@@ -110,7 +134,7 @@ export async function setRoomStake(
     potYen,
     escrowLocked: false,
     payoutSettled: false,
-    stakeSetByAdmin: isCallerAdmin,
+    stakeSetByAdmin: canCustomStake,
   }
 
   // Reset ready flags so every player explicitly confirms the updated stake
@@ -152,7 +176,7 @@ export async function lockRoomEscrow(
 
   for (const p of players) {
     const prof = p.profiles
-    if (prof && !prof.is_admin) {
+    if (prof && !resolveUserPermissions(prof).unlimited_yen) {
       const current = prof.yen_balance ?? DEFAULT_YEN_BALANCE
       const nextBal = Math.max(0, current - stakeYen)
       await supabase
@@ -207,7 +231,7 @@ export async function settleRoomPayout(
   if (!winnerId || winnerId === 'draw') {
     for (const p of players) {
       const prof = p.profiles
-      if (prof && !prof.is_admin) {
+      if (prof && !resolveUserPermissions(prof).unlimited_yen) {
         const current = prof.yen_balance ?? 0
         await supabase
           .from('profiles')
@@ -219,7 +243,7 @@ export async function settleRoomPayout(
   }
 
   const winnerRow = players.find((p) => p.user_id === winnerId)
-  if (winnerRow?.profiles && !winnerRow.profiles.is_admin) {
+  if (winnerRow?.profiles && !resolveUserPermissions(winnerRow.profiles).unlimited_yen) {
     const current = winnerRow.profiles.yen_balance ?? 0
     await supabase
       .from('profiles')
@@ -364,7 +388,7 @@ export async function transferYen(
 
   const { data: senderRow, error: senderErr } = await supabase
     .from('profiles')
-    .select('id, yen_balance, is_admin')
+    .select('id, yen_balance, is_admin, permissions')
     .eq('id', senderId)
     .single()
 
@@ -378,20 +402,22 @@ export async function transferYen(
 
   if (recipErr || !recipientRow) throw recipErr ?? new Error('Destinataire introuvable.')
 
-  const senderIsAdmin = Boolean((senderRow as { is_admin?: boolean }).is_admin)
+  const senderUnlimited = resolveUserPermissions(
+    senderRow as { is_admin?: boolean; permissions?: Partial<UserPermissions> | null },
+  ).unlimited_yen
   const currentSenderBal = (senderRow as { yen_balance?: number }).yen_balance ?? DEFAULT_YEN_BALANCE
   const currentRecipientBal =
     (recipientRow as { yen_balance?: number }).yen_balance ?? DEFAULT_YEN_BALANCE
 
-  if (!senderIsAdmin && currentSenderBal < cleanAmount) {
+  if (!senderUnlimited && currentSenderBal < cleanAmount) {
     throw new Error('Solde en ¥ insuffisant pour effectuer ce virement.')
   }
 
-  const nextSenderBal = senderIsAdmin ? currentSenderBal : currentSenderBal - cleanAmount
+  const nextSenderBal = senderUnlimited ? currentSenderBal : currentSenderBal - cleanAmount
   const nextRecipientBal = currentRecipientBal + cleanAmount
   const now = new Date().toISOString()
 
-  if (!senderIsAdmin) {
+  if (!senderUnlimited) {
     const { error: deductErr } = await supabase
       .from('profiles')
       .update({ yen_balance: nextSenderBal, updated_at: now })
@@ -456,13 +482,15 @@ export async function purchaseTheme(
   const priceYen = getThemePriceYen(themeId)
   const { data: prof, error: fetchErr } = await supabase
     .from('profiles')
-    .select('id, yen_balance, is_admin, unlocked_themes')
+    .select('id, yen_balance, is_admin, permissions, unlocked_themes')
     .eq('id', userId)
     .single()
 
   if (fetchErr || !prof) throw fetchErr ?? new Error('Profil introuvable.')
 
-  const isAdmin = Boolean((prof as { is_admin?: boolean }).is_admin)
+  const hasUnlimited = resolveUserPermissions(
+    prof as { is_admin?: boolean; permissions?: Partial<UserPermissions> | null },
+  ).unlimited_yen
   const currentBal = (prof as { yen_balance?: number }).yen_balance ?? DEFAULT_YEN_BALANCE
   const existing = Array.isArray((prof as { unlocked_themes?: unknown }).unlocked_themes)
     ? ((prof as { unlocked_themes: string[] }).unlocked_themes)
@@ -472,11 +500,11 @@ export async function purchaseTheme(
     return { unlockedThemes: existing, newBalance: currentBal, priceYen: 0 }
   }
 
-  if (!isAdmin && currentBal < priceYen) {
+  if (!hasUnlimited && currentBal < priceYen) {
     throw new Error(`Solde insuffisant (${formatYen(priceYen)} requis).`)
   }
 
-  const nextBalance = isAdmin ? currentBal : currentBal - priceYen
+  const nextBalance = hasUnlimited ? currentBal : currentBal - priceYen
   const nextUnlocked = Array.from(new Set([...existing, themeId]))
 
   const { error: updErr } = await supabase
@@ -501,4 +529,129 @@ export async function purchaseTheme(
   }
 
   return { unlockedThemes: nextUnlocked, newBalance: nextBalance, priceYen }
+}
+
+export interface AdminCreateAccountPayload {
+  username: string
+  display_name?: string
+  email: string
+  password: string
+  is_admin?: boolean
+  permissions?: Partial<UserPermissions>
+  yen_balance?: number
+  clan_title?: string
+  unlock_all_themes?: boolean
+  unlocked_themes?: string[]
+}
+
+export async function adminCreateAccount(
+  adminId: string,
+  payload: AdminCreateAccountPayload,
+): Promise<Profile> {
+  const { data: caller, error: callerErr } = await supabase
+    .from('profiles')
+    .select('id, is_admin, permissions')
+    .eq('id', adminId)
+    .single()
+
+  if (callerErr || !caller) throw callerErr ?? new Error('Administrateur introuvable.')
+
+  const callerPerms = resolveUserPermissions(
+    caller as { is_admin?: boolean; permissions?: Partial<UserPermissions> | null },
+  )
+  if (!callerPerms.can_create_accounts) {
+    throw new Error("Vous n'avez pas la permission de créer des comptes.")
+  }
+
+  const cleanUsername = payload.username.trim()
+  const cleanEmail = payload.email.trim().toLowerCase()
+  if (cleanUsername.length < 2) {
+    throw new Error("Le nom d'utilisateur doit contenir au moins 2 caractères.")
+  }
+  if (!cleanEmail.includes('@')) {
+    throw new Error('Adresse e-mail invalide.')
+  }
+  if (payload.password.length < 4) {
+    throw new Error('Le mot de passe / PIN doit contenir au moins 4 caractères.')
+  }
+
+  const { data: existingUsers } = await supabase
+    .from('profiles')
+    .select('id, username')
+    .eq('username', cleanUsername)
+    .limit(1)
+
+  if (Array.isArray(existingUsers) && existingUsers.length > 0) {
+    throw new Error(`Le nom d'utilisateur « ${cleanUsername} » est déjà utilisé.`)
+  }
+
+  const isAdmin = Boolean(payload.is_admin)
+  const perms: UserPermissions = {
+    can_create_accounts: payload.permissions?.can_create_accounts ?? isAdmin,
+    can_grant_themes: payload.permissions?.can_grant_themes ?? isAdmin,
+    can_set_custom_stakes: payload.permissions?.can_set_custom_stakes ?? isAdmin,
+    unlimited_yen: payload.permissions?.unlimited_yen ?? isAdmin,
+  }
+
+  const allThemes = Array.from(
+    new Set([...DEFAULT_UNLOCKED_THEMES, ...SPECIAL_UNLOCKABLE_THEMES.map((t) => t.id)]),
+  )
+  const unlockedThemes = payload.unlock_all_themes
+    ? allThemes
+    : Array.from(new Set([...DEFAULT_UNLOCKED_THEMES, ...(payload.unlocked_themes ?? [])]))
+
+  const yenBalance = Math.max(0, Math.floor(payload.yen_balance ?? DEFAULT_YEN_BALANCE))
+  const clanTitle = payload.clan_title?.trim() || 'Académie Engei'
+  const displayName = payload.display_name?.trim() || cleanUsername
+  const now = new Date().toISOString()
+
+  let userId: string
+  if (isLocalDemoMode) {
+    userId = registerLocalAccountRecord({
+      email: cleanEmail,
+      password: payload.password,
+      username: cleanUsername,
+    })
+  } else {
+    const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
+      email: cleanEmail,
+      password: payload.password,
+      options: { data: { username: cleanUsername } },
+    })
+    if (signUpErr || !signUpData.user) {
+      throw signUpErr ?? new Error('Échec de création du compte Auth.')
+    }
+    userId = signUpData.user.id
+  }
+
+  const { data: inserted, error: insertErr } = await supabase
+    .from('profiles')
+    .insert({
+      id: userId,
+      username: cleanUsername,
+      display_name: displayName,
+      bio: `${clanTitle} — Membre ENGEI`,
+      avatar_url: null,
+      is_online: true,
+      last_seen: now,
+      created_at: now,
+      updated_at: now,
+      yen_balance: yenBalance,
+      is_admin: isAdmin,
+      permissions: perms,
+      clan_title: clanTitle,
+      card_back_theme: 'engei-crimson',
+      card_front_theme: 'classic',
+      dice_theme: 'obsidian-gold',
+      coin_theme: 'classic-yen',
+      unlocked_themes: unlockedThemes,
+    })
+    .select('*')
+    .single()
+
+  if (insertErr || !inserted) throw insertErr ?? new Error('Échec de création du profil.')
+
+  await supabase.from('presence').upsert({ user_id: userId, is_online: true, last_seen: now })
+
+  return inserted as unknown as Profile
 }

@@ -15,12 +15,14 @@ import { blackjackPlugin } from './blackjack'
 import { savingThrowPlugin } from './saving-throw'
 import { blackjackTwistPlugin } from './blackjack-twist'
 import { fourSeasonsPlugin } from './four-seasons'
+import { arcane23Plugin } from './23e-arcane'
 
 export const GAME_REGISTRY: IGamePlugin[] = [
   blackjackPlugin,
   savingThrowPlugin,
   blackjackTwistPlugin,
-  fourSeasonsPlugin
+  fourSeasonsPlugin,
+  arcane23Plugin,
 ]
 
 /**

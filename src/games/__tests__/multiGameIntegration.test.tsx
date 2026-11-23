@@ -65,11 +65,26 @@ import { QuickDrawPage } from '@/pages/QuickDrawPage'
 import { SavingThrowPage } from '../saving-throw/pages/SavingThrowPage'
 import { BlackjackTwistPage } from '../blackjack-twist/pages/BlackjackTwistPage'
 import { FourSeasonsPage } from '../four-seasons/pages/FourSeasonsPage'
-import { CardThemeSelector, AnimatedDice, AnimatedCoinFlip, ThemedCard, TarotArcanaCard } from '../_shared/components'
-import { UNDERTALE_TAROT_ARCANA, useCardThemeStore } from '../_shared/themes'
+import { Arcane23Page } from '../23e-arcane/pages/Arcane23Page'
+import {
+  CardThemeSelector,
+  AnimatedDice,
+  AnimatedCoinFlip,
+  ThemedCard,
+  TarotArcanaCard,
+  Dice3D,
+  Coin3D,
+} from '../_shared/components'
+import {
+  GASTER_TAROT_ARCANUM,
+  UNDERTALE_TAROT_ARCANA,
+  UNDERTALE_TAROT_BACK_IMAGE,
+  useCardThemeStore,
+} from '../_shared/themes'
 import { createInitialState } from '../saving-throw/engine/savingThrowEngine'
 import { dealInitial } from '../blackjack-twist/engine/twistEngine'
 import { dealInitialHands } from '../four-seasons/engine/fourSeasonsEngine'
+import { createInitialArcane23State } from '../23e-arcane/engine/arcane23Engine'
 
 function renderGameRoute(pathPattern: string, initialEntry: string, element: React.ReactNode) {
   const queryClient = new QueryClient({
@@ -506,7 +521,7 @@ describe('Phase 5 & 6 Multi-Game UI, Realtime Room, Yen Wagering & Player-Bound 
 
     const tarotCard = screen.getByLabelText(/XX — Sans/i)
     expect(tarotCard).toHaveAttribute('data-tarot-arcana', 'Sans')
-    expect(screen.getByText('Sans')).toBeInTheDocument()
+    expect(screen.getByAltText('XX — Sans')).toBeInTheDocument()
 
     expect(document.querySelector('[data-dice-theme="kinto-gacha-dice"]')).toBeInTheDocument()
     expect(document.querySelector('[data-coin-theme="kinto-railgun-coin"]')).toBeInTheDocument()
@@ -565,5 +580,91 @@ describe('Phase 5 & 6 Multi-Game UI, Realtime Room, Yen Wagering & Player-Bound 
     fireEvent.click(screen.getByRole('button', { name: /lancer la pièce 3d/i }))
     expect(screen.getByLabelText(/coin landed on/i)).toBeInTheDocument()
     vQuick.unmount()
+  })
+
+  it('supports interactive 3D Dice & Coin drag rotation, polyhedra, and Tarot card back image', () => {
+    render(
+      <div>
+        <Dice3D dieType="d20" value={20} diceThemeId="astral-crystal" rollKey="d20-1" />
+        <Dice3D dieType="d6" value={6} diceThemeId="kinto-gacha-dice" rollKey="d6-1" />
+        <Coin3D face="tails" coinThemeId="kinto-railgun-coin" flipKey="c1" />
+        <TarotArcanaCard arcanum={UNDERTALE_TAROT_ARCANA[6]} revealed={false} />
+      </div>,
+    )
+
+    const d20 = document.querySelector('[data-dice-type="d20"]') as HTMLElement
+    expect(d20).toBeInTheDocument()
+    expect(d20).toHaveAttribute('data-dice-theme', 'astral-crystal')
+    fireEvent.pointerDown(d20, { clientX: 50, clientY: 50 })
+    fireEvent.pointerMove(d20, { clientX: 85, clientY: 30 })
+    fireEvent.pointerUp(d20)
+    expect(Number(d20.getAttribute('data-rotation-y'))).not.toBe(-18)
+
+    const d6 = document.querySelector('[data-dice-type="d6"]') as HTMLElement
+    expect(d6).toHaveAttribute('data-dice-theme', 'kinto-gacha-dice')
+
+    const coin = screen.getByTestId('coin-3d-canvas')
+    expect(coin).toHaveAttribute('data-coin-face', 'tails')
+    expect(coin).toHaveAttribute('data-coin-theme', 'kinto-railgun-coin')
+    fireEvent.pointerDown(coin, { clientX: 40, clientY: 40 })
+    fireEvent.pointerMove(coin, { clientX: 70, clientY: 55 })
+    fireEvent.pointerUp(coin)
+    expect(Number(coin.getAttribute('data-rotation-y'))).not.toBe(12)
+
+    const tarotBackImg = screen.getByAltText('Dos du Tarot Undertale') as HTMLImageElement
+    expect(tarotBackImg.getAttribute('src')).toBe(UNDERTALE_TAROT_BACK_IMAGE)
+  })
+
+  it('plays Le 23e Arcane end-to-end across Host and Guest & renders D4/D12/D16 and 666 Gaster', async () => {
+    const state = createInitialArcane23State([DEMO_HOST_ID, DEMO_GUEST_ID], DEMO_HOST_ID)
+    state.playersRecord[DEMO_HOST_ID].classicDeck = [
+      { id: 'hearts-A', suit: 'hearts', rank: 'A' },
+    ]
+    state.playersRecord[DEMO_GUEST_ID].classicDeck = [
+      { id: 'clubs-2', suit: 'clubs', rank: '2' },
+    ]
+    const roomId = await seedRoom('23e-arcane', state as unknown as Record<string, unknown>)
+
+    // Host chooses classic
+    currentTestUserId = DEMO_HOST_ID
+    const v1 = renderGameRoute(
+      '/room/:roomId/play/23e-arcane',
+      `/room/${roomId}/play/23e-arcane`,
+      <Arcane23Page />,
+    )
+    const classicBtn = await screen.findByRole('button', { name: /tirer carte classique/i })
+    fireEvent.click(classicBtn)
+    await waitFor(() => {
+      expect(screen.getByText(/votre choix secret.*verrouillé/i)).toBeInTheDocument()
+    })
+    v1.unmount()
+
+    // Guest locks in classic -> round resolves immediately in favor of Host (A > 2)
+    currentTestUserId = DEMO_GUEST_ID
+    const v2 = renderGameRoute(
+      '/room/:roomId/play/23e-arcane',
+      `/room/${roomId}/play/23e-arcane`,
+      <Arcane23Page />,
+    )
+    const guestBtn = await screen.findByRole('button', { name: /tirer carte classique/i })
+    fireEvent.click(guestBtn)
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /manche suivante/i })).toBeInTheDocument()
+    })
+    v2.unmount()
+
+    // Verify D4, D12, D16 and 666. Gaster rendering
+    render(
+      <div>
+        <Dice3D dieType="d4" value={4} />
+        <Dice3D dieType="d12" value={12} />
+        <Dice3D dieType="d16" value={16} />
+        <TarotArcanaCard arcanum={GASTER_TAROT_ARCANUM} />
+      </div>,
+    )
+    expect(document.querySelector('[data-dice-type="d4"]')).toBeInTheDocument()
+    expect(document.querySelector('[data-dice-type="d12"]')).toBeInTheDocument()
+    expect(document.querySelector('[data-dice-type="d16"]')).toBeInTheDocument()
+    expect(screen.getByAltText(/666 — Gaster/i)).toBeInTheDocument()
   })
 })

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { createLocalSupabaseClient, DEMO_HOST_ID, DEMO_GUEST_ID } from '@/lib/localSupabase'
+import { createLocalSupabaseClient, DEMO_HOST_ID, DEMO_GUEST_ID, listDemoAccounts } from '@/lib/localSupabase'
 
 const { localClient } = vi.hoisted(() => ({
   localClient: { current: null as ReturnType<typeof createLocalSupabaseClient> | null },
@@ -23,6 +23,8 @@ import {
   adminAdjustYenBalance,
   adminSetThemeUnlock,
   adminUnlockAllThemes,
+  adminCreateAccount,
+  resolveUserPermissions,
   updatePlayerCardThemes,
   transferYen,
   getRecentYenTransactions,
@@ -221,5 +223,63 @@ describe('walletService (Trésorerie ENGEI)', () => {
     const dup = await purchaseTheme(DEMO_GUEST_ID, 'kinto-gacha-dice')
     expect(dup.priceYen).toBe(0)
     expect(dup.newBalance).toBe(9400)
+  })
+
+  it('allows Admin to provision new accounts with custom permissions, Yen balance, clan, and themes', async () => {
+    // Non-admin Sam cannot create accounts
+    await expect(
+      adminCreateAccount(DEMO_GUEST_ID, {
+        username: 'unauth_user',
+        email: 'unauth@engei.local',
+        password: 'password123',
+      }),
+    ).rejects.toThrow(/permission/i)
+
+    // Admin creates Kirari with custom stakes + unlimited yen + all themes, but not can_create_accounts
+    const created = await adminCreateAccount(DEMO_HOST_ID, {
+      username: 'kirari_bami',
+      display_name: 'Kirari Momobami',
+      email: 'kirari@engei.local',
+      password: 'password123',
+      is_admin: false,
+      permissions: {
+        can_create_accounts: false,
+        can_grant_themes: true,
+        can_set_custom_stakes: true,
+        unlimited_yen: true,
+      },
+      yen_balance: 250000,
+      clan_title: 'Clan Momobami',
+      unlock_all_themes: true,
+    })
+
+    expect(created.username).toBe('kirari_bami')
+    expect(created.yen_balance).toBe(250000)
+    expect(created.clan_title).toBe('Clan Momobami')
+    expect(created.unlocked_themes).toContain('kinto-pay-to-win')
+    expect(created.unlocked_themes).toContain('undertale-tarot')
+
+    const perms = resolveUserPermissions(created)
+    expect(perms.can_set_custom_stakes).toBe(true)
+    expect(perms.unlimited_yen).toBe(true)
+    expect(perms.can_create_accounts).toBe(false)
+
+    // Duplicate username rejected
+    await expect(
+      adminCreateAccount(DEMO_HOST_ID, {
+        username: 'kirari_bami',
+        email: 'kirari2@engei.local',
+        password: 'password123',
+      }),
+    ).rejects.toThrow(/déjà utilisé/i)
+
+    // Custom stake permission lets Kirari set non-preset stakes
+    const roomId = await createTwoPlayerRoom(0)
+    const customStake = await setRoomStake(roomId, 7777, created)
+    expect(customStake.stakeYen).toBe(7777)
+
+    // Newly created account is exposed in demo account list
+    const demoList = listDemoAccounts()
+    expect(demoList.some((a) => a.username === 'kirari_bami')).toBe(true)
   })
 })

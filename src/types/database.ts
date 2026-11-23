@@ -6,6 +6,13 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[]
 
+export interface DbUserPermissions {
+  can_create_accounts: boolean
+  can_grant_themes: boolean
+  can_set_custom_stakes: boolean
+  unlimited_yen: boolean
+}
+
 export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
@@ -576,6 +583,7 @@ export type Database = {
           is_admin: boolean
           is_online: boolean
           last_seen: string
+          permissions: DbUserPermissions | null
           unlocked_themes: string[]
           updated_at: string
           username: string
@@ -595,6 +603,7 @@ export type Database = {
           is_admin?: boolean
           is_online?: boolean
           last_seen?: string
+          permissions?: Partial<DbUserPermissions> | null
           unlocked_themes?: string[]
           updated_at?: string
           username: string
@@ -614,6 +623,7 @@ export type Database = {
           is_admin?: boolean
           is_online?: boolean
           last_seen?: string
+          permissions?: Partial<DbUserPermissions> | null
           unlocked_themes?: string[]
           updated_at?: string
           username?: string

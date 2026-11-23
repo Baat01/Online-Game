@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { clsx } from 'clsx'
-import type { TarotArcanum } from '../themes'
+import { UNDERTALE_TAROT_BACK_IMAGE, type TarotArcanum } from '../themes'
 
 export interface TarotArcanaCardProps {
   arcanum: TarotArcanum
@@ -13,9 +13,9 @@ export interface TarotArcanaCardProps {
 }
 
 const TAROT_SIZE_CLASSES = {
-  sm: 'w-28 h-52',
-  md: 'w-40 h-72',
-  lg: 'w-48 h-88 sm:w-52 sm:h-96',
+  sm: 'w-28 h-60',
+  md: 'w-38 h-82',
+  lg: 'w-44 h-96 sm:w-48 sm:h-[26rem]',
 }
 
 export function TarotArcanaCard({
@@ -28,62 +28,54 @@ export function TarotArcanaCard({
   className,
 }: TarotArcanaCardProps) {
   const [imgError, setImgError] = useState(false)
+  const [backImgError, setBackImgError] = useState(false)
 
   const content = !revealed ? (
-    <div
-      className="w-full h-full rounded-lg border-2 border-amber-400/70 bg-gradient-to-br from-[#141118] via-[#1f1629] to-[#0a0a0e] flex flex-col items-center justify-center p-3"
-      style={{
-        backgroundImage:
-          'repeating-linear-gradient(45deg, rgba(212,175,55,0.12) 0px, rgba(212,175,55,0.12) 2px, transparent 2px, transparent 10px)',
-      }}
-    >
-      <div className="size-12 rounded-full border-2 border-amber-400/70 flex items-center justify-center text-amber-300 font-serif font-bold text-lg bg-black/50">
-        ☽
-      </div>
-      <span className="mt-2 text-[10px] font-serif uppercase tracking-widest text-amber-300/80">
-        Arcana ENGEI
-      </span>
+    <div className="relative w-full h-full overflow-hidden rounded-xl border-2 border-amber-400/75 bg-[#120d16] shadow-[0_12px_28px_rgba(212,175,55,0.28)]">
+      {!backImgError ? (
+        <img
+          src={UNDERTALE_TAROT_BACK_IMAGE}
+          alt="Dos du Tarot Undertale"
+          onError={() => setBackImgError(true)}
+          className="w-full h-full object-cover"
+        />
+      ) : (
+        <div className="w-full h-full flex flex-col items-center justify-center p-3">
+          <div className="size-12 rounded-full border-2 border-amber-400/70 flex items-center justify-center text-amber-300 font-serif font-bold text-lg bg-black/50">
+            ☽
+          </div>
+          <span className="mt-2 text-[10px] font-serif uppercase tracking-widest text-amber-300/80">
+            Arcana ENGEI
+          </span>
+        </div>
+      )}
     </div>
   ) : (
     <div
       className={clsx(
-        'relative w-full h-full flex flex-col justify-between overflow-hidden rounded-lg border-2 border-amber-400/85 bg-[#0e0b12] p-1 shadow-[0_12px_32px_rgba(212,175,55,0.28)]',
+        'relative w-full h-full overflow-hidden rounded-xl border-2 border-amber-400/90 bg-[#0e0b12] shadow-[0_14px_34px_rgba(212,175,55,0.34)]',
         reversed && 'rotate-180',
       )}
     >
-      {/* Top ornate gold bar */}
-      <div className="flex items-center justify-between px-1.5 py-0.5 bg-black/75 border-b border-amber-500/40 rounded-t z-10">
-        <span className="text-[10px] font-serif font-bold text-amber-300 tracking-widest">
-          {arcanum.roman}
-        </span>
-        <span className="text-[9px] uppercase tracking-wider text-amber-200/80 truncate ml-1">
-          {arcanum.arcanaTitle}
-        </span>
-      </div>
-
-      {/* Center High-Res Undertale Artwork */}
-      <div className="relative flex-1 my-0.5 overflow-hidden rounded border border-amber-500/40 bg-stone-950 flex items-center justify-center">
-        {!imgError ? (
-          <img
-            src={arcanum.imagePath}
-            alt={`${arcanum.roman} — ${arcanum.name}`}
-            onError={() => setImgError(true)}
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div className="flex flex-col items-center justify-center p-3 text-center">
-            <span className="text-xl font-serif font-bold text-amber-300">{arcanum.roman}</span>
-            <span className="text-xs font-serif text-amber-100 mt-1">{arcanum.name}</span>
-          </div>
-        )}
-      </div>
-
-      {/* Bottom Title Plate */}
-      <div className="px-1.5 py-1 bg-black/80 border-t border-amber-500/40 rounded-b text-center z-10">
-        <p className="text-[11px] font-serif font-bold uppercase tracking-wider text-amber-200 truncate leading-tight">
-          {arcanum.name}
-        </p>
-      </div>
+      {/* Full-resolution artwork inside ornate obsidian & gold bevel */}
+      {!imgError ? (
+        <img
+          src={arcanum.imagePath}
+          alt={`${arcanum.roman} — ${arcanum.name}`}
+          onError={() => setImgError(true)}
+          className="w-full h-full object-contain bg-[#f2ead9]"
+        />
+      ) : (
+        <div className="w-full h-full flex flex-col items-center justify-center p-3 text-center bg-stone-950">
+          <span className="text-xl font-serif font-bold text-amber-300">{arcanum.roman}</span>
+          <span className="text-xs font-serif text-amber-100 mt-1">{arcanum.name}</span>
+          <span className="text-[10px] text-amber-400/80 mt-0.5">{arcanum.arcanaTitle}</span>
+        </div>
+      )}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 rounded-xl ring-1 ring-inset ring-amber-300/60"
+      />
     </div>
   )
 

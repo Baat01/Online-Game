@@ -61,6 +61,12 @@ function createInitialDb(): LocalDbState {
           updated_at: ts,
           yen_balance: 500000,
           is_admin: true,
+          permissions: {
+            can_create_accounts: true,
+            can_grant_themes: true,
+            can_set_custom_stakes: true,
+            unlimited_yen: true,
+          },
           clan_title: 'Clan Momobami',
           card_back_theme: 'bami-gold',
           card_front_theme: 'royal-fantasy',
@@ -85,6 +91,12 @@ function createInitialDb(): LocalDbState {
           updated_at: ts,
           yen_balance: 10000,
           is_admin: false,
+          permissions: {
+            can_create_accounts: false,
+            can_grant_themes: false,
+            can_set_custom_stakes: false,
+            unlimited_yen: false,
+          },
           clan_title: 'Clan Jabami',
           card_back_theme: 'engei-crimson',
           card_front_theme: 'classic',
@@ -148,6 +160,16 @@ function createInitialDb(): LocalDbState {
           enabled: true,
           created_at: ts,
         },
+        {
+          id: '20000000-0000-4000-8000-000000000005',
+          slug: '23e-arcane',
+          name: 'Le 23e Arcane',
+          description: 'Duel asymétrique en 5 manches : 52 cartes, 22 Arcanes du Tarot et anomalie 1/666 Gaster.',
+          min_players: 2,
+          max_players: 2,
+          enabled: true,
+          created_at: ts,
+        },
       ],
       game_rooms: [],
       room_players: [],
@@ -173,6 +195,20 @@ function hydrateProfileDefaults(profile: Row): Row {
   return {
     yen_balance: profile.id === DEMO_HOST_ID ? 500000 : 10000,
     is_admin: profile.id === DEMO_HOST_ID,
+    permissions:
+      profile.id === DEMO_HOST_ID
+        ? {
+            can_create_accounts: true,
+            can_grant_themes: true,
+            can_set_custom_stakes: true,
+            unlimited_yen: true,
+          }
+        : {
+            can_create_accounts: false,
+            can_grant_themes: false,
+            can_set_custom_stakes: false,
+            unlimited_yen: false,
+          },
     clan_title: profile.id === DEMO_HOST_ID ? 'Clan Momobami' : 'Clan Jabami',
     card_back_theme: profile.id === DEMO_HOST_ID ? 'bami-gold' : 'engei-crimson',
     card_front_theme: profile.id === DEMO_HOST_ID ? 'royal-fantasy' : 'classic',
@@ -181,11 +217,11 @@ function hydrateProfileDefaults(profile: Row): Row {
     unlocked_themes:
       profile.id === DEMO_HOST_ID
         ? [
-            'classic', 'royal-fantasy', 'minimalist', 'midnight-neon', 'undertale-tarot', 'kinto-pay-to-win',
-            'engei-crimson', 'bami-gold', 'obsidian-minimalist', 'kinto-sovereign-back',
-            'obsidian-gold', 'crimson-engei', 'ivory-academy', 'cyber-tokyo', 'astral-crystal', 'kinto-gacha-dice',
-            'classic-yen', 'momobami-seal', 'engei-scarlet', 'railgun-coin', 'eclipse-medal', 'kinto-railgun-coin',
-          ]
+          'classic', 'royal-fantasy', 'minimalist', 'midnight-neon', 'undertale-tarot', 'kinto-pay-to-win',
+          'engei-crimson', 'bami-gold', 'obsidian-minimalist', 'kinto-sovereign-back',
+          'obsidian-gold', 'crimson-engei', 'ivory-academy', 'cyber-tokyo', 'astral-crystal', 'kinto-gacha-dice',
+          'classic-yen', 'momobami-seal', 'engei-scarlet', 'railgun-coin', 'eclipse-medal', 'kinto-railgun-coin',
+        ]
         : [
           'classic', 'royal-fantasy', 'minimalist',
           'engei-crimson', 'bami-gold', 'obsidian-minimalist',
@@ -241,6 +277,17 @@ export function getActiveDemoUserId(): string | null {
     window.sessionStorage?.setItem(ACTIVE_USER_SESSION_KEY, DEMO_HOST_ID)
     return DEMO_HOST_ID
   }
+  if (playerParam) {
+    const db = loadDb()
+    const match = db.users.find(
+      (u) =>
+        u.id === playerParam || u.username.toLowerCase() === playerParam.trim().toLowerCase(),
+    )
+    if (match) {
+      window.sessionStorage?.setItem(ACTIVE_USER_SESSION_KEY, match.id)
+      return match.id
+    }
+  }
   const stored = window.sessionStorage?.getItem(ACTIVE_USER_SESSION_KEY)
   if (stored === 'signed_out') return null
   return stored || DEMO_HOST_ID
@@ -249,6 +296,61 @@ export function getActiveDemoUserId(): string | null {
 export function setActiveDemoUserId(userId: string | null): void {
   if (typeof window === 'undefined' || !window.sessionStorage) return
   window.sessionStorage.setItem(ACTIVE_USER_SESSION_KEY, userId ?? 'signed_out')
+}
+
+export interface DemoAccountSummary {
+  id: string
+  email: string
+  username: string
+  display_name: string | null
+  is_admin: boolean
+  clan_title: string | null
+}
+
+export function listDemoAccounts(): DemoAccountSummary[] {
+  const db = loadDb()
+  return db.users.map((u) => {
+    const prof = db.tables.profiles.find((p) => p.id === u.id)
+    return {
+      id: u.id,
+      email: u.email,
+      username: u.username,
+      display_name: (prof?.display_name as string | null) ?? u.username,
+      is_admin: Boolean(prof?.is_admin),
+      clan_title: (prof?.clan_title as string | null) ?? null,
+    }
+  })
+}
+
+export function registerLocalAccountRecord(entry: {
+  id?: string
+  email: string
+  password: string
+  username: string
+}): string {
+  const db = loadDb()
+  const existing = db.users.find(
+    (u) =>
+      u.email.toLowerCase() === entry.email.toLowerCase() ||
+      u.username.toLowerCase() === entry.username.toLowerCase(),
+  )
+  if (existing) {
+    throw new Error('Un compte avec cet e-mail ou identifiant existe déjà.')
+  }
+  const id = entry.id ?? makeUuid()
+  db.users.push({
+    id,
+    email: entry.email,
+    password: entry.password,
+    username: entry.username,
+  })
+  saveDb(db)
+  return id
+}
+
+export function switchActiveDemoAccount(userId: string): void {
+  setActiveDemoUserId(userId)
+  notifyAuthChange('SIGNED_IN')
 }
 
 // ── Realtime Event Bus (same-tab + cross-tab via BroadcastChannel & storage events) ──
@@ -782,6 +884,7 @@ export function createLocalSupabaseClient(): SupabaseClient<Database> {
   loadDb()
 
   const client = {
+    __isLocalDemo: true,
     auth: {
       async getSession() {
         return { data: { session: buildSessionForUser(getActiveDemoUserId()) }, error: null }
@@ -845,6 +948,12 @@ export function createLocalSupabaseClient(): SupabaseClient<Database> {
           updated_at: ts,
           yen_balance: 10000,
           is_admin: false,
+          permissions: {
+            can_create_accounts: false,
+            can_grant_themes: false,
+            can_set_custom_stakes: false,
+            unlimited_yen: false,
+          },
           clan_title: 'Académie Engei',
           card_back_theme: 'engei-crimson',
           card_front_theme: 'classic',

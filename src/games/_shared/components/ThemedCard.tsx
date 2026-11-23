@@ -76,9 +76,11 @@ function CourtCardIllustration({
   size: 'sm' | 'md' | 'lg'
 }) {
   const frameCls = size === 'sm' ? 'w-8 h-10' : size === 'lg' ? 'w-14 h-20' : 'w-11 h-14'
-  const accentGold = isKinto ? '#facc15' : '#d97706'
+  const accentGold = isKinto ? '#facc15' : '#b45309'
   const coatPrimary = isKinto ? '#18181b' : suit === 'hearts' || suit === 'diamonds' ? '#991b1b' : '#1e293b'
   const coatSecondary = isKinto ? '#eab308' : '#b45309'
+  const hasClassicAsset = !isKinto && (rank === 'J' || rank === 'Q' || rank === 'K')
+  const assetSrc = hasClassicAsset ? `/themes/classic-courts/${suit}-${rank}.png` : null
 
   return (
     <div
@@ -88,13 +90,13 @@ function CourtCardIllustration({
         frameCls,
         isKinto
           ? 'border-amber-400/65 bg-stone-950/90'
-          : 'border-amber-600/40 bg-amber-950/5',
+          : 'border-amber-700/45 bg-white shadow-inner',
       )}
     >
       <svg viewBox="0 0 64 84" className="w-full h-full" aria-hidden="true">
         {/* Decorative royal medallion frame */}
         <rect x="2" y="2" width="60" height="80" rx="5" fill="none" stroke={accentGold} strokeOpacity="0.45" strokeWidth="1.5" />
-        <line x1="6" y1="42" x2="58" y2="42" stroke={accentGold} strokeOpacity="0.25" strokeWidth="1" strokeDasharray="3 2" />
+        <line x1="6" y1="74" x2="58" y2="10" stroke={accentGold} strokeOpacity="0.3" strokeWidth="1" strokeDasharray="3 2" />
 
         {rank === 'J' && (
           <>
@@ -157,6 +159,17 @@ function CourtCardIllustration({
         {/* Small suit emblem at base of portrait */}
         <circle cx="32" cy="74" r="6" fill="#09090b" fillOpacity="0.65" stroke={accentGold} strokeWidth="0.9" />
       </svg>
+      {assetSrc && (
+        <img
+          src={assetSrc}
+          alt={`${rank} of ${suit}`}
+          draggable={false}
+          className="absolute inset-0 w-full h-full object-contain bg-white"
+          onError={(e) => {
+            e.currentTarget.style.display = 'none'
+          }}
+        />
+      )}
     </div>
   )
 }

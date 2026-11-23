@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useBlocker } from 'react-router-dom'
-import { UserCircle2, Coins, Shield, PlusCircle, LockOpen, Lock, Send } from 'lucide-react'
+import { UserCircle2, Coins, Shield, PlusCircle, LockOpen, Lock, Send, UserPlus, ArrowRightLeft } from 'lucide-react'
 import { AvatarUploader } from '@/components/profile/AvatarUploader'
 import { ProfileForm } from '@/components/profile/ProfileForm'
 import { Card } from '@/components/ui/Card'
@@ -13,17 +13,20 @@ import { CardThemeSelector } from '@/games/_shared/components'
 import { SPECIAL_UNLOCKABLE_THEMES } from '@/games/_shared/themes'
 import {
   adminAdjustYenBalance,
+  adminCreateAccount,
   adminSetThemeUnlock,
   adminUnlockAllThemes,
+  DEFAULT_USER_PERMISSIONS,
   DEFAULT_YEN_BALANCE,
   formatYen,
   getRecentYenTransactions,
   listProfilesForAdmin,
+  resolveUserPermissions,
   transferYen,
   type YenTransaction,
 } from '@/services/wallet/walletService'
-import { DEMO_GUEST_ID } from '@/lib/localSupabase'
-import type { Profile } from '@/types/auth'
+import { DEMO_GUEST_ID, switchActiveDemoAccount } from '@/lib/localSupabase'
+import type { Profile, UserPermissions } from '@/types/auth'
 import type { UpdateProfilePayload } from '@/types/profile'
 
 /**
@@ -54,6 +57,18 @@ export function ProfilePage() {
   const [transferNote, setTransferNote] = useState('')
   const [isTransferring, setIsTransferring] = useState(false)
   const [recentTransactions, setRecentTransactions] = useState<YenTransaction[]>([])
+
+  // Admin Account Creation Form State
+  const [newUsername, setNewUsername] = useState('')
+  const [newDisplayName, setNewDisplayName] = useState('')
+  const [newEmail, setNewEmail] = useState('')
+  const [newPassword, setNewPassword] = useState('engei1234')
+  const [newYenBalance, setNewYenBalance] = useState('10000')
+  const [newClanTitle, setNewClanTitle] = useState('Clan Obami')
+  const [newIsAdmin, setNewIsAdmin] = useState(false)
+  const [newPermissions, setNewPermissions] = useState<UserPermissions>(DEFAULT_USER_PERMISSIONS)
+  const [newUnlockAll, setNewUnlockAll] = useState(false)
+  const [isCreatingAccount, setIsCreatingAccount] = useState(false)
 
   useEffect(() => {
     if (!profile?.id) return
@@ -174,6 +189,40 @@ export function ProfilePage() {
       toast(err instanceof Error ? err.message : 'Erreur lors du crédit.', 'error')
     } finally {
       setIsGranting(false)
+    }
+  }
+
+  const handleCreateAccount = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!profile?.id) return
+    const parsedBal = parseInt(newYenBalance, 10)
+    if (!Number.isFinite(parsedBal) || parsedBal < 0) {
+      toast('Entrez un solde initial valide en ¥.', 'error')
+      return
+    }
+    setIsCreatingAccount(true)
+    try {
+      const created = await adminCreateAccount(profile.id, {
+        username: newUsername,
+        display_name: newDisplayName || newUsername,
+        email: newEmail,
+        password: newPassword,
+        is_admin: newIsAdmin,
+        permissions: newPermissions,
+        yen_balance: parsedBal,
+        clan_title: newClanTitle,
+        unlock_all_themes: newUnlockAll,
+      })
+      setAdminTargets((prev) => [...prev, created])
+      setSelectedTargetId(created.id)
+      setNewUsername('')
+      setNewDisplayName('')
+      setNewEmail('')
+      toast(`Compte @${created.username} créé avec succès !`, 'success')
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Erreur lors de la création du compte.', 'error')
+    } finally {
+      setIsCreatingAccount(false)
     }
   }
 
@@ -414,47 +463,231 @@ export function ProfilePage() {
               )}
             </div>
 
-            {profile.is_admin && (
+            {(profile.is_admin ||
+              resolveUserPermissions(profile).can_create_accounts ||
+              resolveUserPermissions(profile).can_grant_themes) && (
               <div className="space-y-4 pt-2 border-t border-surface-700/70">
-                <div className="space-y-2">
-                  <p className="text-xs font-semibold text-gold-400 uppercase tracking-wider">
-                    Privilèges Trésorier (Admin)
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input
-                      type="number"
-                      min={1}
-                      value={grantAmount}
-                      onChange={(e) => setGrantAmount(e.target.value)}
-                      aria-label="Montant en ¥ à créditer"
-                      className="w-32 px-3 py-1.5 rounded-btn bg-surface-900 border border-surface-600 text-sm font-mono text-slate-100"
-                    />
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      isLoading={isGranting}
-                      onClick={() => void handleAdminGrant(profile.id, 'votre compte')}
-                      leftIcon={<PlusCircle className="size-3.5" />}
-                    >
-                      Créditer mon solde
-                    </Button>
-                    {profile.id !== DEMO_GUEST_ID && (
+                {profile.is_admin && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-gold-400 uppercase tracking-wider">
+                      Privilèges Trésorier (Admin)
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="number"
+                        min={1}
+                        value={grantAmount}
+                        onChange={(e) => setGrantAmount(e.target.value)}
+                        aria-label="Montant en ¥ à créditer"
+                        className="w-32 px-3 py-1.5 rounded-btn bg-surface-900 border border-surface-600 text-sm font-mono text-slate-100"
+                      />
                       <Button
                         type="button"
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         isLoading={isGranting}
-                        onClick={() => void handleAdminGrant(DEMO_GUEST_ID, 'Sam Chen')}
+                        onClick={() => void handleAdminGrant(profile.id, 'votre compte')}
+                        leftIcon={<PlusCircle className="size-3.5" />}
                       >
-                        Créditer Sam Chen
+                        Créditer mon solde
                       </Button>
-                    )}
+                      {profile.id !== DEMO_GUEST_ID && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          isLoading={isGranting}
+                          onClick={() => void handleAdminGrant(DEMO_GUEST_ID, 'Sam Chen')}
+                        >
+                          Créditer Sam Chen
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                </div>
+                )}
+
+                {/* Admin Account Creation Form */}
+                {resolveUserPermissions(profile).can_create_accounts && (
+                  <form
+                    onSubmit={(e) => void handleCreateAccount(e)}
+                    className="space-y-3 pt-2 border-t border-surface-700/70"
+                  >
+                    <div className="flex items-center gap-2">
+                      <UserPlus className="size-4 text-gold-400" aria-hidden="true" />
+                      <p className="text-xs font-semibold text-gold-400 uppercase tracking-wider">
+                        Créer un compte utilisateur (Admin)
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <input
+                        type="text"
+                        required
+                        value={newUsername}
+                        onChange={(e) => setNewUsername(e.target.value)}
+                        placeholder="Identifiant (ex: kirari_bami)"
+                        aria-label="Nouvel identifiant utilisateur"
+                        className="px-3 py-1.5 rounded-btn bg-surface-900 border border-surface-600 text-xs text-slate-100"
+                      />
+                      <input
+                        type="text"
+                        value={newDisplayName}
+                        onChange={(e) => setNewDisplayName(e.target.value)}
+                        placeholder="Nom affiché (ex: Kirari Momobami)"
+                        aria-label="Nom affiché du nouveau compte"
+                        className="px-3 py-1.5 rounded-btn bg-surface-900 border border-surface-600 text-xs text-slate-100"
+                      />
+                      <input
+                        type="email"
+                        required
+                        value={newEmail}
+                        onChange={(e) => setNewEmail(e.target.value)}
+                        placeholder="E-mail (ex: kirari@engei.local)"
+                        aria-label="E-mail du nouveau compte"
+                        className="px-3 py-1.5 rounded-btn bg-surface-900 border border-surface-600 text-xs text-slate-100"
+                      />
+                      <input
+                        type="password"
+                        required
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="Mot de passe / PIN"
+                        aria-label="Mot de passe du nouveau compte"
+                        className="px-3 py-1.5 rounded-btn bg-surface-900 border border-surface-600 text-xs text-slate-100"
+                      />
+                      <input
+                        type="number"
+                        min={0}
+                        value={newYenBalance}
+                        onChange={(e) => setNewYenBalance(e.target.value)}
+                        aria-label="Solde initial en ¥"
+                        placeholder="Solde initial ¥"
+                        className="px-3 py-1.5 rounded-btn bg-surface-900 border border-surface-600 text-xs font-mono text-slate-100"
+                      />
+                      <select
+                        aria-label="Clan / Titre du nouveau compte"
+                        value={newClanTitle}
+                        onChange={(e) => setNewClanTitle(e.target.value)}
+                        className="px-3 py-1.5 rounded-btn bg-surface-900 border border-surface-600 text-xs text-slate-100"
+                      >
+                        <option value="Clan Momobami">Clan Momobami</option>
+                        <option value="Clan Jabami">Clan Jabami</option>
+                        <option value="Clan Obami">Clan Obami</option>
+                        <option value="Clan Sōbami">Clan Sōbami</option>
+                        <option value="Clan Totobami">Clan Totobami</option>
+                        <option value="Académie UA">Académie UA</option>
+                        <option value="Académie Engei">Académie Engei</option>
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-300 bg-surface-900/60 p-3 rounded-xl border border-surface-700/70">
+                      <label className="inline-flex items-center gap-2 font-semibold text-gold-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={newIsAdmin}
+                          onChange={(e) => {
+                            const checked = e.target.checked
+                            setNewIsAdmin(checked)
+                            setNewPermissions({
+                              can_create_accounts: checked,
+                              can_grant_themes: checked,
+                              can_set_custom_stakes: checked,
+                              unlimited_yen: checked,
+                            })
+                          }}
+                        />
+                        Admin complet
+                      </label>
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={newUnlockAll}
+                          onChange={(e) => setNewUnlockAll(e.target.checked)}
+                        />
+                        Débloquer tous les thèmes
+                      </label>
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={newPermissions.can_create_accounts}
+                          onChange={(e) =>
+                            setNewPermissions((p) => ({ ...p, can_create_accounts: e.target.checked }))
+                          }
+                        />
+                        Peut créer des comptes
+                      </label>
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={newPermissions.can_grant_themes}
+                          onChange={(e) =>
+                            setNewPermissions((p) => ({ ...p, can_grant_themes: e.target.checked }))
+                          }
+                        />
+                        Peut accorder des thèmes
+                      </label>
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={newPermissions.can_set_custom_stakes}
+                          onChange={(e) =>
+                            setNewPermissions((p) => ({ ...p, can_set_custom_stakes: e.target.checked }))
+                          }
+                        />
+                        Mises personnalisées (¥)
+                      </label>
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={newPermissions.unlimited_yen}
+                          onChange={(e) =>
+                            setNewPermissions((p) => ({ ...p, unlimited_yen: e.target.checked }))
+                          }
+                        />
+                        Yens illimités (∞ ¥)
+                      </label>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <Button
+                        type="submit"
+                        size="sm"
+                        variant="primary"
+                        isLoading={isCreatingAccount}
+                        leftIcon={<UserPlus className="size-3.5" />}
+                      >
+                        Créer le compte
+                      </Button>
+
+                      {adminTargets.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {adminTargets
+                            .filter((t) => t.id !== profile.id)
+                            .slice(0, 4)
+                            .map((acc) => (
+                              <Button
+                                key={acc.id}
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  switchActiveDemoAccount(acc.id)
+                                  void refreshProfile()
+                                  toast(`Connecté en tant que ${acc.display_name ?? acc.username}`, 'info')
+                                }}
+                                leftIcon={<ArrowRightLeft className="size-3" />}
+                              >
+                                Basculer ({acc.username})
+                              </Button>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  </form>
+                )}
 
                 {/* Admin Theme Access Manager */}
-                {adminTargets.length > 0 && (
+                {resolveUserPermissions(profile).can_grant_themes && adminTargets.length > 0 && (
                   <div className="space-y-2.5 pt-2 border-t border-surface-700/70">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="text-xs font-semibold text-gold-400 uppercase tracking-wider">

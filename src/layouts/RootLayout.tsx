@@ -1,8 +1,9 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { clsx } from 'clsx'
 import { Spade, Home, Users, Gamepad2, Dices, Moon, Sun, LogIn, UserPlus, LogOut, Coins, Shield } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
+import { listDemoAccounts, switchActiveDemoAccount, type DemoAccountSummary } from '@/lib/localSupabase'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/hooks/useTheme'
 import { useAuth } from '@/hooks/useAuth'
@@ -34,9 +35,18 @@ export function RootLayout() {
   const { toast } = useToast()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const isLocalDemo = Boolean((supabase as unknown as { __isLocalDemo?: boolean }).__isLocalDemo)
+  const [demoAccounts, setDemoAccounts] = useState<DemoAccountSummary[]>(() =>
+    isLocalDemo ? listDemoAccounts() : [],
+  )
 
   // Manage self-presence: go online when logged in, offline on logout/unmount
   useSelfPresence()
+
+  useEffect(() => {
+    if (!isLocalDemo) return
+    setDemoAccounts(listDemoAccounts())
+  }, [isLocalDemo, profile?.id])
 
   // Real-time Yen transfer notification for recipient
   useEffect(() => {
@@ -172,7 +182,7 @@ export function RootLayout() {
                   <span>
                     {formatYen(
                       profile?.yen_balance ?? DEFAULT_YEN_BALANCE,
-                      Boolean(profile?.is_admin),
+                      Boolean(profile?.is_admin || profile?.permissions?.unlimited_yen),
                       true,
                     )}
                   </span>
@@ -183,6 +193,27 @@ export function RootLayout() {
                     </span>
                   )}
                 </NavLink>
+
+                {isLocalDemo && demoAccounts.length > 1 && (
+                  <select
+                    aria-label="Changer de compte ENGEI"
+                    value={user.id}
+                    onChange={(e) => {
+                      const targetId = e.target.value
+                      switchActiveDemoAccount(targetId)
+                      void refreshProfile()
+                      void queryClient.invalidateQueries()
+                    }}
+                    className="hidden md:block px-2 py-1 rounded-btn bg-surface-800 border border-surface-600 text-xs text-slate-200 max-w-36"
+                  >
+                    {demoAccounts.map((acc) => (
+                      <option key={acc.id} value={acc.id}>
+                        {acc.display_name ?? acc.username}
+                        {acc.is_admin ? ' (Admin)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
 
                 <NavLink
                   to="/profile"

@@ -15,6 +15,8 @@ import {
 import { createStandardDeck, shuffleDeck, type Suit } from '@/games/_shared/deck'
 import { flipCoin, roll2d10, combine2d10, rollDie } from '@/games/_shared/randomUtils'
 import {
+  ALL_UNDERTALE_TAROT_ARCANA,
+  GASTER_TAROT_ARCANUM,
   UNDERTALE_TAROT_ARCANA,
   UNDERTALE_TAROT_DECK_META,
   isThemeUnlocked,
@@ -24,7 +26,7 @@ import {
 import { formatYen, purchaseTheme } from '@/services/wallet/walletService'
 
 type QuickDrawTab = 'cards' | 'tarot' | 'dice' | 'coin'
-type DieMode = 'd6' | 'd10' | '2d10' | 'd20'
+type DieMode = 'd4' | 'd6' | 'd8' | 'd10' | '2d10' | 'd12' | 'd16' | 'd20'
 
 interface DrawnSandboxCard {
   id: string
@@ -106,13 +108,16 @@ export function QuickDrawPage() {
   const [tarotDraws, setTarotDraws] = useState<DrawnTarotEntry[]>([])
   const [buyingTarot, setBuyingTarot] = useState(false)
 
-  const handleDrawTarot = (count: 1 | 3) => {
-    const shuffled = [...UNDERTALE_TAROT_ARCANA].sort(() => Math.random() - 0.5)
+  const handleDrawTarot = (count: 1 | 3, includeAnomaly = false) => {
+    const gasterHit =
+      rollDie(10) - 1 === 6 && rollDie(10) - 1 === 6 && rollDie(10) - 1 === 6
+    const pool = includeAnomaly || gasterHit ? ALL_UNDERTALE_TAROT_ARCANA : UNDERTALE_TAROT_ARCANA
+    const shuffled = [...pool].sort(() => Math.random() - 0.5)
     const labels = count === 3 ? ['Passé', 'Présent', 'Futur'] : ['Arcane du Destin']
     const picks: DrawnTarotEntry[] = shuffled.slice(0, count).map((arcanum, idx) => ({
-      arcanum,
+      arcanum: idx === 0 && gasterHit ? GASTER_TAROT_ARCANUM : arcanum,
       reversed: allowReversed && Math.random() < 0.35,
-      slotLabel: labels[idx] ?? `Carte ${idx + 1}`,
+      slotLabel: idx === 0 && gasterHit ? 'Anomalie 1/666' : (labels[idx] ?? `Carte ${idx + 1}`),
     }))
     setTarotDraws(picks)
   }
@@ -150,8 +155,17 @@ export function QuickDrawPage() {
       setDice2d10({ tens, units, total })
       setDiceHistory((prev) => [`2d10 → ${total} (${tens}0 + ${units})`, ...prev].slice(0, 6))
     } else {
-      const sides = dieMode === 'd6' ? 6 : dieMode === 'd10' ? 10 : 20
-      const val = rollDie(sides)
+      const sidesMap: Record<Exclude<DieMode, '2d10'>, number> = {
+        d4: 4,
+        d6: 6,
+        d8: 8,
+        d10: 10,
+        d12: 12,
+        d16: 16,
+        d20: 20,
+      }
+      const sides = sidesMap[dieMode]
+      const val = dieMode === 'd10' ? rollDie(10) - 1 : rollDie(sides)
       setSingleDieVal(val)
       setDiceHistory((prev) => [`${dieMode.toUpperCase()} → ${val}`, ...prev].slice(0, 6))
     }
@@ -332,6 +346,21 @@ export function QuickDrawPage() {
                     <Button type="button" variant="secondary" onClick={() => handleDrawTarot(3)}>
                       Tirage 3 Cartes (Passé · Présent · Futur)
                     </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() =>
+                        setTarotDraws([
+                          {
+                            arcanum: GASTER_TAROT_ARCANUM,
+                            reversed: false,
+                            slotLabel: 'Anomalie 666',
+                          },
+                        ])
+                      }
+                    >
+                      Invoquer 666. Gaster
+                    </Button>
                   </div>
                   <label className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
                     <input
@@ -392,11 +421,25 @@ export function QuickDrawPage() {
           <Card.Body className="space-y-6 py-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-2">
-                {(['d6', 'd10', '2d10', 'd20'] as const).map((m) => (
+                {(['d4', 'd6', 'd8', 'd10', '2d10', 'd12', 'd16', 'd20'] as const).map((m) => (
                   <button
                     key={m}
                     type="button"
-                    onClick={() => setDieMode(m)}
+                    onClick={() => {
+                      setDieMode(m)
+                      if (m !== '2d10') {
+                        const maxSide: Record<Exclude<DieMode, '2d10'>, number> = {
+                          d4: 4,
+                          d6: 6,
+                          d8: 8,
+                          d10: 9,
+                          d12: 12,
+                          d16: 16,
+                          d20: 20,
+                        }
+                        setSingleDieVal(maxSide[m])
+                      }
+                    }}
                     className={clsx(
                       'px-3 py-1.5 rounded-btn text-xs font-bold uppercase border cursor-pointer',
                       dieMode === m
@@ -433,6 +476,7 @@ export function QuickDrawPage() {
                   units={null}
                   combinedScore={singleDieVal}
                   singleDieLabel={dieMode.toUpperCase()}
+                  singleDieType={dieMode}
                   singleDieValue={singleDieVal}
                   rollKey={rollKey}
                   diceThemeId={activeDice}

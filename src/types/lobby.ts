@@ -1,5 +1,7 @@
+import type { UserPermissions } from './auth'
+
 /**
- * Lobby domain types — Phase 3.
+ * Lobby domain types.
  * All domain objects for game catalog, rooms, players, and invitations.
  */
 
@@ -38,6 +40,7 @@ export interface PlayerProfile {
   avatar_url: string | null
   yen_balance?: number
   is_admin?: boolean
+  permissions?: UserPermissions | null
   clan_title?: string | null
   card_back_theme?: string
   card_front_theme?: string

@@ -11,6 +11,14 @@ export interface AuthUser {
   email: string
 }
 
+/** Granular ENGEI administrative/treasury capabilities */
+export interface UserPermissions {
+  can_create_accounts: boolean
+  can_grant_themes: boolean
+  can_set_custom_stakes: boolean
+  unlimited_yen: boolean
+}
+
 /** Shape of the public.profiles row */
 export interface Profile {
   id: string
@@ -24,6 +32,7 @@ export interface Profile {
   updated_at: string
   yen_balance?: number
   is_admin?: boolean
+  permissions?: UserPermissions | null
   clan_title?: string | null
   card_back_theme?: string
   card_front_theme?: string

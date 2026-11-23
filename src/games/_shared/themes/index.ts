@@ -33,8 +33,12 @@ export {
 } from './cardThemes'
 export { useCardThemeStore, useCardTheme } from './cardThemeStore'
 export {
+  ALL_UNDERTALE_TAROT_ARCANA,
+  GASTER_TAROT_ARCANUM,
   UNDERTALE_TAROT_ARCANA,
+  UNDERTALE_TAROT_BACK_IMAGE,
   UNDERTALE_TAROT_DECK_META,
   getTarotArcanaForCard,
+  getUndertaleArcanum,
   type TarotArcanum,
 } from './undertaleTarot'

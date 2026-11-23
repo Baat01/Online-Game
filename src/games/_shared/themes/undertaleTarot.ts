@@ -10,6 +10,8 @@ export interface TarotArcanum {
   meaningReversed: string
 }
 
+export const UNDERTALE_TAROT_BACK_IMAGE = '/themes/undertale-tarot/back.jpg'
+
 export const UNDERTALE_TAROT_DECK_META = {
   id: 'undertale-tarot' as const,
   name: 'Tarot Undertale — Arcanes Majeurs',
@@ -78,10 +80,10 @@ export const UNDERTALE_TAROT_ARCANA: TarotArcanum[] = [
     number: 6,
     roman: 'VI',
     name: 'Royal Guards',
-    arcanaTitle: 'The Lovers',
+    arcanaTitle: "L'Amoureux / The Lovers",
     imagePath: '/themes/undertale-tarot/6.jpg',
-    meaningUpright: 'Alliance sincère, confiance mutuelle et harmonie du duo.',
-    meaningReversed: 'Sentiments tus, déséquilibre ou choix repoussé.',
+    meaningUpright: 'Deux armures scellées par un lien indéfectible et une confiance absolue.',
+    meaningReversed: 'Hésitation affective, armure émotionnelle ou choix différé.',
   },
   {
     number: 7,
@@ -114,7 +116,7 @@ export const UNDERTALE_TAROT_ARCANA: TarotArcanum[] = [
     number: 10,
     roman: 'X',
     name: 'Temmie',
-    arcanaTitle: 'Wheel of Fortune',
+    arcanaTitle: 'La Roue de la Fortune / Wheel of Fortune',
     imagePath: '/themes/undertale-tarot/10.jpg',
     meaningUpright: 'Hasard favorable, opportunité inattendue et cycle prospère.',
     meaningReversed: 'Revers imprévu, caprice du sort ou précipitation.',
@@ -151,7 +153,7 @@ export const UNDERTALE_TAROT_ARCANA: TarotArcanum[] = [
     roman: 'XIV',
     name: 'Muffet',
     arcanaTitle: 'Temperance',
-    imagePath: '/themes/undertale-tarot/14.jpg',
+    imagePath: '/themes/undertale-tarot/14.webp',
     meaningUpright: 'Équilibre des échanges, patience calculée et tisseur de liens.',
     meaningReversed: 'Avidité excessive ou accord déséquilibré.',
   },
@@ -160,7 +162,7 @@ export const UNDERTALE_TAROT_ARCANA: TarotArcanum[] = [
     roman: 'XV',
     name: 'Chara',
     arcanaTitle: 'The Devil',
-    imagePath: '/themes/undertale-tarot/15.jpg',
+    imagePath: '/themes/undertale-tarot/15.webp',
     meaningUpright: 'Tentation du pouvoir absolu, pacte sombre et obsession.',
     meaningReversed: 'Libération des chaînes et refus de la corruption.',
   },
@@ -169,7 +171,7 @@ export const UNDERTALE_TAROT_ARCANA: TarotArcanum[] = [
     roman: 'XVI',
     name: 'Omega Flowey',
     arcanaTitle: 'The Tower',
-    imagePath: '/themes/undertale-tarot/16.jpg',
+    imagePath: '/themes/undertale-tarot/16.webp',
     meaningUpright: 'Bouleversement soudain, chute des illusions et choc révélateur.',
     meaningReversed: 'Catastrophe évitée de justesse ou chaos contenu.',
   },
@@ -178,7 +180,7 @@ export const UNDERTALE_TAROT_ARCANA: TarotArcanum[] = [
     roman: 'XVII',
     name: 'Mettaton',
     arcanaTitle: 'The Star',
-    imagePath: '/themes/undertale-tarot/17.jpg',
+    imagePath: '/themes/undertale-tarot/17.webp',
     meaningUpright: 'Rayonnement charismatique, inspiration et spectacle triomphant.',
     meaningReversed: 'Vanité, perte de flamme ou façade artificielle.',
   },
@@ -187,7 +189,7 @@ export const UNDERTALE_TAROT_ARCANA: TarotArcanum[] = [
     roman: 'XVIII',
     name: 'Napstablook',
     arcanaTitle: 'The Moon',
-    imagePath: '/themes/undertale-tarot/18.jpg',
+    imagePath: '/themes/undertale-tarot/18.webp',
     meaningUpright: 'Mélancolie rêveuse, intuition profonde et clair-obscur apaisant.',
     meaningReversed: 'Brume dissipée, apaisement intérieur après le doute.',
   },
@@ -196,7 +198,7 @@ export const UNDERTALE_TAROT_ARCANA: TarotArcanum[] = [
     roman: 'XIX',
     name: 'Grillby',
     arcanaTitle: 'The Sun',
-    imagePath: '/themes/undertale-tarot/19.jpg',
+    imagePath: '/themes/undertale-tarot/19.webp',
     meaningUpright: 'Chaleur bienveillante, clarté sereine et hospitalité rayonnante.',
     meaningReversed: 'Éclat voilé, fatigue silencieuse ou ardeur retenue.',
   },
@@ -205,7 +207,7 @@ export const UNDERTALE_TAROT_ARCANA: TarotArcanum[] = [
     roman: 'XX',
     name: 'Sans',
     arcanaTitle: 'Judgement',
-    imagePath: '/themes/undertale-tarot/20.jpg',
+    imagePath: '/themes/undertale-tarot/20.webp',
     meaningUpright: 'Heure du bilan, lucidité implacable et pesée des actes.',
     meaningReversed: 'Jugement évité, procrastination ou remords différé.',
   },
@@ -214,7 +216,7 @@ export const UNDERTALE_TAROT_ARCANA: TarotArcanum[] = [
     roman: 'XXI',
     name: 'Mt. Ebott',
     arcanaTitle: 'The World',
-    imagePath: '/themes/undertale-tarot/21.jpg',
+    imagePath: '/themes/undertale-tarot/21.webp',
     meaningUpright: 'Accomplissement suprême, harmonie retrouvée et horizon ouvert.',
     meaningReversed: 'Boucle inachevée avant le dernier pas vers la surface.',
   },
@@ -241,6 +243,27 @@ const RANK_INDEX: Record<string, number> = {
   J: 10,
   Q: 11,
   K: 12,
+}
+
+export const GASTER_TAROT_ARCANUM: TarotArcanum = {
+  number: 666,
+  roman: '666',
+  name: 'Gaster',
+  arcanaTitle: "L'Anomalie du Vide / The Void Anomaly",
+  imagePath: '/themes/undertale-tarot/666.jpg',
+  meaningUpright: 'Faille dimensionnelle (1/666) : renverse la fatalité et tranche l’issue du duel.',
+  meaningReversed: 'Écho fragmenté dans le Néant ; l’espace-temps échappe à toute règle.',
+}
+
+export const ALL_UNDERTALE_TAROT_ARCANA: TarotArcanum[] = [
+  ...UNDERTALE_TAROT_ARCANA,
+  GASTER_TAROT_ARCANUM,
+]
+
+export function getUndertaleArcanum(index: number): TarotArcanum {
+  if (index === 666) return GASTER_TAROT_ARCANUM
+  const clamped = ((Math.trunc(index) % UNDERTALE_TAROT_ARCANA.length) + UNDERTALE_TAROT_ARCANA.length) % UNDERTALE_TAROT_ARCANA.length
+  return UNDERTALE_TAROT_ARCANA[clamped]
 }
 
 export function getTarotArcanaForCard(suit: Suit, rank: Rank | string): TarotArcanum {

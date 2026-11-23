@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
 import { clsx } from 'clsx'
 import { useOptionalAuthContext } from '@/contexts/AuthContext'
 import { resolveCoinTheme, useCardTheme } from '../themes'
+import { Coin3D } from './Coin3D'
 
 interface AnimatedCoinFlipProps {
   choice?: 'heads' | 'tails' | null
@@ -9,6 +9,7 @@ interface AnimatedCoinFlipProps {
   flipping?: boolean
   coinThemeId?: string
   label?: string
+  flipKey?: string | number
 }
 
 export function AnimatedCoinFlip({
@@ -17,67 +18,24 @@ export function AnimatedCoinFlip({
   flipping = false,
   coinThemeId,
   label,
+  flipKey,
 }: AnimatedCoinFlipProps) {
   const auth = useOptionalAuthContext()
   const { coinThemeId: storeCoinId } = useCardTheme()
   const coinTheme = resolveCoinTheme(coinThemeId ?? auth?.profile?.coin_theme ?? storeCoinId)
 
-  const [isSpinning, setIsSpinning] = useState(false)
-
-  useEffect(() => {
-    if (!result && !flipping) {
-      setIsSpinning(false)
-      return
-    }
-    setIsSpinning(true)
-    const timer = window.setTimeout(() => setIsSpinning(false), 950)
-    return () => window.clearTimeout(timer)
-  }, [result, flipping])
-
   const displayFace = result ?? choice ?? 'heads'
-  const faceGradient =
-    displayFace === 'heads' ? coinTheme.headsGradientClass : coinTheme.tailsGradientClass
-  const faceSymbol = displayFace === 'heads' ? coinTheme.headsSymbol : coinTheme.tailsSymbol
-  const isRailgun = coinTheme.id === 'kinto-railgun-coin' || coinTheme.id === 'railgun-coin'
 
   return (
     <div className="flex flex-col items-center gap-3" data-coin-theme={coinTheme.id}>
-      <div className="relative flex items-center justify-center" style={{ perspective: '800px' }}>
-        {isSpinning && (
-          <span
-            aria-hidden="true"
-            className={clsx(
-              'absolute inset-0 rounded-full border-2 pointer-events-none animate-impact-ring motion-reduce:hidden',
-              coinTheme.rimColorClass,
-            )}
-          />
-        )}
-        {isRailgun && isSpinning && (
-          <span
-            aria-hidden="true"
-            className="absolute -inset-2 rounded-full border border-dashed border-amber-400/75 pointer-events-none animate-spin motion-reduce:hidden"
-          />
-        )}
-
-        <div
-          className={clsx(
-            'relative size-24 sm:size-28 rounded-full border-4 bg-gradient-to-br flex items-center justify-center transition-transform duration-500 motion-reduce:transition-none',
-            faceGradient,
-            coinTheme.glowClass,
-            isSpinning && 'animate-coin-flip motion-reduce:animate-none',
-          )}
-          aria-label={result ? `Coin landed on ${result}` : 'Coin ready to flip'}
-        >
-          {/* Specular rim & inner minted ring */}
-          <div className="size-18 sm:size-20 rounded-full border-2 border-dashed border-current/45 flex flex-col items-center justify-center bg-white/10 backdrop-blur-[0.5px]">
-            <span className="text-2xl sm:text-3xl font-black leading-none" aria-hidden="true">
-              {faceSymbol}
-            </span>
-            <span className="text-[10px] font-extrabold uppercase tracking-widest mt-1">
-              {displayFace === 'heads' ? 'Face (Heads)' : 'Pile (Tails)'}
-            </span>
-          </div>
-        </div>
+      <div aria-label={result ? `Coin landed on ${result}` : 'Coin ready to flip'}>
+        <Coin3D
+          face={displayFace}
+          coinThemeId={coinTheme.id}
+          flipKey={flipKey ?? (result ? `${result}-${String(flipping)}` : undefined)}
+          flipping={flipping}
+          size="md"
+        />
       </div>
 
       {label && <p className="text-xs text-slate-400 font-medium">{label}</p>}

@@ -8,6 +8,8 @@ import { FormField } from '@/components/auth/FormField'
 import { Button } from '@/components/ui/Button'
 import { useAuth } from '@/hooks/useAuth'
 import { loginSchema, type LoginFormValues } from '@/services/auth/authSchemas'
+import { supabase } from '@/lib/supabase'
+import { listDemoAccounts, switchActiveDemoAccount } from '@/lib/localSupabase'
 
 /**
  * Login page — email + password form.
@@ -18,6 +20,8 @@ export function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
   const [apiError, setApiError] = useState<string | null>(null)
+  const isLocalDemo = Boolean((supabase as unknown as { __isLocalDemo?: boolean }).__isLocalDemo)
+  const demoAccounts = isLocalDemo ? listDemoAccounts() : []
 
   const {
     register,
@@ -97,6 +101,30 @@ export function LoginPage() {
         >
           {isSubmitting ? 'Signing in…' : 'Sign in'}
         </Button>
+
+        {isLocalDemo && demoAccounts.length > 0 && (
+          <div className="pt-3 border-t border-surface-700 space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-gold-400">
+              Comptes locaux ENGEI (Connexion rapide)
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+              {demoAccounts.map((acc) => (
+                <Button
+                  key={acc.id}
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    switchActiveDemoAccount(acc.id)
+                    navigate('/', { replace: true })
+                  }}
+                >
+                  {acc.display_name ?? acc.username}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
       </form>
     </AuthCard>
   )

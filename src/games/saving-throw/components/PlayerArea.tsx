@@ -89,6 +89,7 @@ export function PlayerArea({
         rollKey={`${player.userId}-${player.rollCount}`}
         highlightWinner={isRoundWinner}
         diceThemeId={diceThemeId}
+        targetScore={player.role === 'second' ? targetToBeat : null}
       />
 
       {/* Round / Lock status */}
