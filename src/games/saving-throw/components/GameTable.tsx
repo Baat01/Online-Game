@@ -1,4 +1,5 @@
 import { AnimatedCoinFlip } from '../../_shared/components'
+import { formatYen } from '@/services/wallet/walletService'
 import type { SavingThrowPlayer, SavingThrowState } from '../engine/savingThrowEngine'
 import { PlayerArea } from './PlayerArea'
 
@@ -6,9 +7,15 @@ interface GameTableProps {
   gameState: SavingThrowState
   currentUserId?: string
   playerProfiles: Record<string, { displayName: string }>
+  potYen?: number
 }
 
-export function GameTable({ gameState, currentUserId, playerProfiles }: GameTableProps) {
+export function GameTable({
+  gameState,
+  currentUserId,
+  playerProfiles,
+  potYen = 0,
+}: GameTableProps) {
   const players = Object.values(gameState.playersRecord) as SavingThrowPlayer[]
   const firstPlayer = players.find((p) => p.role === 'first')
   const targetToBeat = firstPlayer?.finalScore ?? null
@@ -54,6 +61,11 @@ export function GameTable({ gameState, currentUserId, playerProfiles }: GameTabl
               ? 'Victory! You won the match!'
               : `${playerProfiles[gameState.gameWinnerId ?? '']?.displayName ?? 'Opponent'} won the match!`}
           </h2>
+          {potYen > 0 && (
+            <p className="text-sm font-mono text-gold-300">
+              Pot remporté : +{formatYen(potYen)}
+            </p>
+          )}
           {gameState.coinResult && (
             <AnimatedCoinFlip
               choice={gameState.coinChoice}

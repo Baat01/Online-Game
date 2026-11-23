@@ -1,8 +1,9 @@
-import { ShieldCheck, UserMinus } from 'lucide-react'
+import { ShieldCheck, UserMinus, Shield } from 'lucide-react'
 import { clsx } from 'clsx'
 import { Button } from '@/components/ui/Button'
 import { Avatar } from '@/components/friends/Avatar'
 import { OnlineIndicator } from '@/components/presence/OnlineIndicator'
+import { formatYen } from '@/services/wallet/walletService'
 import type { RoomPlayer } from '@/types/lobby'
 
 interface RoomPlayerCardProps {
@@ -66,8 +67,26 @@ export function RoomPlayerCard({
               Host
             </span>
           )}
+          {profile.is_admin && (
+            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-brand-500/15 text-brand-300 border border-brand-500/30">
+              <Shield className="size-2.5" aria-hidden="true" />
+              Admin
+            </span>
+          )}
+          {profile.clan_title && (
+            <span className="text-[11px] text-gold-300/80 font-medium">
+              · {profile.clan_title}
+            </span>
+          )}
         </div>
-        <p className="text-xs text-slate-500 truncate">@{profile.username}</p>
+        <p className="text-xs text-slate-500 truncate">
+          @{profile.username}
+          {typeof profile.yen_balance === 'number' && (
+            <span className="ml-2 font-mono text-gold-400/90">
+              {formatYen(profile.yen_balance, Boolean(profile.is_admin), true)}
+            </span>
+          )}
+        </p>
       </div>
 
       {/* Ready badge */}

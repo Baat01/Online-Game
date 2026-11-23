@@ -92,7 +92,7 @@ export function dealInitial(
     const drawP = drawCards(deck, 2)
     deck = drawP.remaining
 
-    const hand = drawP.drawn
+    const hand = drawP.drawn.map((c) => ({ ...c, ownerId: id }))
     playersRecord[id] = {
       userId: id,
       hand,
@@ -213,7 +213,7 @@ export function drawTurnCard(
   const { drawn, remaining } = drawCards(workingDeck, 1)
   if (drawn.length === 0) return state
 
-  const card = { ...drawn[0], isHidden: false }
+  const card = { ...drawn[0], isHidden: false, ownerId: userId }
 
   if (isFaceCard(card)) {
     return {

@@ -36,6 +36,11 @@ export interface PlayerProfile {
   username: string
   display_name: string | null
   avatar_url: string | null
+  yen_balance?: number
+  is_admin?: boolean
+  clan_title?: string | null
+  card_back_theme?: string
+  card_front_theme?: string
 }
 
 /** A player seated in a game room */

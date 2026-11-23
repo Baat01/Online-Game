@@ -1,11 +1,13 @@
-import { Dices, ArrowLeft, Trophy } from 'lucide-react'
+import { Dices, ArrowLeft, Trophy, Coins } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { formatYen } from '@/services/wallet/walletService'
 import type { SavingThrowState } from '../engine/savingThrowEngine'
 
 interface GameStatusProps {
   gameState: SavingThrowState
   currentUserId?: string
   playerProfiles: Record<string, { displayName: string }>
+  potYen?: number
   onBackToLobby: () => void
 }
 
@@ -13,6 +15,7 @@ export function GameStatus({
   gameState,
   currentUserId,
   playerProfiles,
+  potYen = 0,
   onBackToLobby,
 }: GameStatusProps) {
   const players = Object.values(gameState.playersRecord)
@@ -44,6 +47,12 @@ export function GameStatus({
       </div>
 
       <div className="flex items-center gap-3">
+        {potYen > 0 && (
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gold-500/15 border border-gold-500/35 text-gold-300 font-mono text-xs font-semibold">
+            <Coins className="size-3.5" aria-hidden="true" />
+            Pot : {formatYen(potYen)}
+          </div>
+        )}
         <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-surface-800 border border-surface-700 text-xs">
           <Trophy className="size-3.5 text-amber-400" aria-hidden="true" />
           {players.map((p, idx) => (

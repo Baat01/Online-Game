@@ -1,12 +1,17 @@
 import { useState, useCallback } from 'react'
 import { useBlocker } from 'react-router-dom'
-import { UserCircle2 } from 'lucide-react'
+import { UserCircle2, Coins, Shield, PlusCircle } from 'lucide-react'
 import { AvatarUploader } from '@/components/profile/AvatarUploader'
 import { ProfileForm } from '@/components/profile/ProfileForm'
 import { Card } from '@/components/ui/Card'
+import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { useProfile } from '@/hooks/useProfile'
+import { useAuth } from '@/hooks/useAuth'
 import { useToast } from '@/components/ui/Toast'
+import { CardThemeSelector } from '@/games/_shared/components'
+import { adminAdjustYenBalance, DEFAULT_YEN_BALANCE, formatYen } from '@/services/wallet/walletService'
+import { DEMO_GUEST_ID } from '@/lib/localSupabase'
 import type { UpdateProfilePayload } from '@/types/profile'
 
 /**
@@ -23,9 +28,30 @@ import type { UpdateProfilePayload } from '@/types/profile'
  */
 export function ProfilePage() {
   const { profile, isLoading, isSaving, isUploadingAvatar, isRemovingAvatar,
-    updateProfile, uploadAvatar, removeAvatar, checkUsernameAvailable } = useProfile()
+    updateProfile, uploadAvatar, removeAvatar, checkUsernameAvailable, refresh } = useProfile()
+  const { refreshProfile } = useAuth()
   const { toast } = useToast()
   const [isDirty, setIsDirty] = useState(false)
+  const [grantAmount, setGrantAmount] = useState('10000')
+  const [isGranting, setIsGranting] = useState(false)
+
+  const handleAdminGrant = async (targetUserId: string, label: string) => {
+    const parsed = parseInt(grantAmount, 10)
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      toast('Entrez un montant valide en ¥.', 'error')
+      return
+    }
+    setIsGranting(true)
+    try {
+      await adminAdjustYenBalance(targetUserId, parsed, 'add')
+      await Promise.all([refresh(), refreshProfile()])
+      toast(`+${formatYen(parsed)} crédités à ${label}.`, 'success')
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Erreur lors du crédit.', 'error')
+    } finally {
+      setIsGranting(false)
+    }
+  }
 
   // ── Navigation blocker (unsaved changes guard) ───────────────────────────
   useBlocker(
@@ -137,6 +163,83 @@ export function ProfilePage() {
             />
           </Card.Body>
         </Card>
+
+        {/* ── Banque des 6 Lances (Yen Wallet) ── */}
+        <Card className="border-gold-500/30 bg-surface-800/90">
+          <Card.Header>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2">
+                <Coins className="size-4 text-gold-400" aria-hidden="true" />
+                <h2 className="text-base font-semibold text-slate-100">
+                  Banque des 6 Lances — Trésorerie
+                </h2>
+              </div>
+              {profile.clan_title && (
+                <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-brand-500/15 border border-brand-500/30 text-brand-300">
+                  {profile.clan_title}
+                </span>
+              )}
+            </div>
+          </Card.Header>
+          <Card.Body className="space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-3 p-3 rounded-xl bg-surface-900/80 border border-surface-700">
+              <div>
+                <p className="text-xs uppercase tracking-wider text-slate-400">Solde disponible</p>
+                <p className="text-2xl font-mono font-extrabold text-gold-300">
+                  {formatYen(profile.yen_balance ?? DEFAULT_YEN_BALANCE)}
+                </p>
+              </div>
+              {profile.is_admin && (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-500/20 border border-brand-500/40 text-brand-300 text-xs font-bold">
+                  <Shield className="size-3.5" aria-hidden="true" />
+                  Admin · ¥ Illimités (∞ ¥)
+                </span>
+              )}
+            </div>
+
+            {profile.is_admin && (
+              <div className="space-y-2 pt-1">
+                <p className="text-xs font-semibold text-gold-400 uppercase tracking-wider">
+                  Privilèges Trésorier (Admin)
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    value={grantAmount}
+                    onChange={(e) => setGrantAmount(e.target.value)}
+                    aria-label="Montant en ¥ à créditer"
+                    className="w-32 px-3 py-1.5 rounded-btn bg-surface-900 border border-surface-600 text-sm font-mono text-slate-100"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    isLoading={isGranting}
+                    onClick={() => void handleAdminGrant(profile.id, 'votre compte')}
+                    leftIcon={<PlusCircle className="size-3.5" />}
+                  >
+                    Créditer mon solde
+                  </Button>
+                  {profile.id !== DEMO_GUEST_ID && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      isLoading={isGranting}
+                      onClick={() => void handleAdminGrant(DEMO_GUEST_ID, 'Sam Chen')}
+                    >
+                      Créditer Sam Chen
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+          </Card.Body>
+        </Card>
+
+        {/* ── Player-Bound Card Themes ── */}
+        <CardThemeSelector mode="inline" />
 
         {/* ── Account info (read-only) ── */}
         <Card>

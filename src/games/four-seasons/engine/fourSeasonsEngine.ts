@@ -71,7 +71,7 @@ export function dealInitialHands(
     deck = drawP.remaining
     playersRecord[id] = {
       userId: id,
-      hand: drawP.drawn,
+      hand: drawP.drawn.map((c) => ({ ...c, ownerId: id })),
     }
   }
 
@@ -182,7 +182,7 @@ export function applyEffect(
       if (workingDeck.length > 0) {
         const drawn = drawCards(workingDeck, 1)
         workingDeck = drawn.remaining
-        nextPlayersRecord[pid].hand.push(drawn.drawn[0])
+        nextPlayersRecord[pid].hand.push({ ...drawn.drawn[0], ownerId: pid })
       }
     }
   } else if (card.rank === 'Q') {
@@ -236,7 +236,7 @@ export function drawCard(
       ...state.playersRecord,
       [userId]: {
         ...player,
-        hand: [...player.hand, drawn[0]],
+        hand: [...player.hand, { ...drawn[0], ownerId: userId }],
       },
     },
   }
@@ -255,7 +255,7 @@ export function playCard(
   const cardIndex = player.hand.findIndex((c) => c.id === cardId)
   if (cardIndex === -1) return state
 
-  const card = player.hand[cardIndex]
+  const card = { ...player.hand[cardIndex], ownerId: userId }
   const newHand = player.hand.filter((_, i) => i !== cardIndex)
 
   const afterDiscard: FourSeasonsState = {

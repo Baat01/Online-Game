@@ -8,7 +8,15 @@ interface Props {
   game: BlackjackGame
   isMe: boolean
   isMyTurn: boolean
-  profileMap: Record<string, { username: string; avatarUrl: string | null }>
+  profileMap: Record<
+    string,
+    {
+      username: string
+      avatarUrl: string | null
+      cardFrontTheme?: string
+      cardBackTheme?: string
+    }
+  >
 }
 
 export function PlayerSeat({ player, game, isMe, profileMap }: Props) {
@@ -60,7 +68,12 @@ export function PlayerSeat({ player, game, isMe, profileMap }: Props) {
       {/* Cards */}
       <div className="min-h-[8rem] flex items-center justify-center">
         {player.hand.length > 0 ? (
-          <CardStack cards={player.hand} stacked={false} />
+          <CardStack
+            cards={player.hand}
+            stacked={false}
+            frontThemeId={profile?.cardFrontTheme}
+            backThemeId={profile?.cardBackTheme}
+          />
         ) : (
           <div className="w-16 h-24 border border-dashed border-white/10 rounded-lg" />
         )}

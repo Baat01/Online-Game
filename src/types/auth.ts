@@ -22,6 +22,11 @@ export interface Profile {
   last_seen: string
   created_at: string
   updated_at: string
+  yen_balance?: number
+  is_admin?: boolean
+  clan_title?: string | null
+  card_back_theme?: string
+  card_front_theme?: string
 }
 
 /** Shape of the public.presence row */

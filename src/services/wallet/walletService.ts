@@ -1,0 +1,265 @@
+import { supabase } from '@/lib/supabase'
+import type { Json } from '@/types/database'
+import type { GameRoom } from '@/types/lobby'
+
+export const PRESET_YEN_STAKES = [0, 100, 500, 1000, 5000] as const
+export const DEFAULT_YEN_BALANCE = 10000
+
+export function formatYen(
+  amount: number | undefined | null,
+  isAdmin = false,
+  showInfinityForAdmin = false,
+): string {
+  if (showInfinityForAdmin && isAdmin) {
+    return '∞ ¥'
+  }
+  const safe = Math.max(0, Math.floor(amount ?? 0))
+  const formatted = safe.toLocaleString('fr-FR').replace(/\u202f|\u00a0/g, ' ')
+  return `${formatted} ¥`
+}
+
+export function getRoomStake(room: Pick<GameRoom, 'metadata'> | null | undefined): number {
+  const raw = room?.metadata?.stakeYen
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0) return 0
+  return Math.floor(raw)
+}
+
+export function getRoomPot(room: Pick<GameRoom, 'metadata'> | null | undefined): number {
+  const rawPot = room?.metadata?.potYen
+  if (typeof rawPot === 'number' && Number.isFinite(rawPot) && rawPot >= 0) {
+    return Math.floor(rawPot)
+  }
+  return getRoomStake(room) * 2
+}
+
+interface RoomPlayerWithProfile {
+  user_id: string
+  profiles: {
+    id: string
+    yen_balance?: number
+    is_admin?: boolean
+  } | null
+}
+
+async function fetchRoomContext(roomId: string) {
+  const { data: roomRow, error: roomErr } = await supabase
+    .from('game_rooms')
+    .select('id, host_id, state, metadata')
+    .eq('id', roomId)
+    .single()
+
+  if (roomErr || !roomRow) throw roomErr ?? new Error('Salle introuvable')
+
+  const { data: playerRows, error: playersErr } = await supabase
+    .from('room_players')
+    .select('user_id, profiles!inner(id, yen_balance, is_admin)')
+    .eq('room_id', roomId)
+
+  if (playersErr) throw playersErr
+
+  const players = (playerRows ?? []) as unknown as RoomPlayerWithProfile[]
+  const metadata =
+    roomRow.metadata && typeof roomRow.metadata === 'object' && !Array.isArray(roomRow.metadata)
+      ? { ...(roomRow.metadata as Record<string, unknown>) }
+      : {}
+
+  return { roomRow, players, metadata }
+}
+
+export async function setRoomStake(
+  roomId: string,
+  stakeYen: number,
+  caller: { id: string; is_admin?: boolean } | null,
+): Promise<{ stakeYen: number; potYen: number }> {
+  const cleanStake = Math.floor(stakeYen)
+  if (!Number.isFinite(cleanStake) || cleanStake < 0) {
+    throw new Error('La mise en ¥ doit être positive ou nulle.')
+  }
+
+  const { roomRow, players, metadata } = await fetchRoomContext(roomId)
+
+  const isCallerAdmin = Boolean(caller?.is_admin)
+  if (!isCallerAdmin && roomRow.host_id !== caller?.id) {
+    throw new Error("Seul l'hôte ou un administrateur peut modifier la mise.")
+  }
+
+  if (!isCallerAdmin) {
+    const isPreset = (PRESET_YEN_STAKES as readonly number[]).includes(cleanStake)
+    if (!isPreset) {
+      throw new Error('Seul un administrateur peut définir une mise personnalisée.')
+    }
+    if (cleanStake > 0) {
+      for (const p of players) {
+        if (!p.profiles?.is_admin && (p.profiles?.yen_balance ?? DEFAULT_YEN_BALANCE) < cleanStake) {
+          throw new Error("Solde en ¥ insuffisant pour l'un des joueurs de la salle.")
+        }
+      }
+    }
+  }
+
+  const potYen = cleanStake * Math.max(2, players.length)
+  const nextMetadata: Record<string, unknown> = {
+    ...metadata,
+    stakeYen: cleanStake,
+    potYen,
+    escrowLocked: false,
+    payoutSettled: false,
+    stakeSetByAdmin: isCallerAdmin,
+  }
+
+  // Reset ready flags so every player explicitly confirms the updated stake
+  await supabase
+    .from('room_players')
+    .update({ ready: false })
+    .eq('room_id', roomId)
+
+  const nextRoomState = roomRow.state === 'ready' ? 'waiting' : roomRow.state
+  const { error: updateErr } = await supabase
+    .from('game_rooms')
+    .update({
+      metadata: nextMetadata as Json,
+      state: nextRoomState,
+    })
+    .eq('id', roomId)
+
+  if (updateErr) throw updateErr
+
+  return { stakeYen: cleanStake, potYen }
+}
+
+export async function lockRoomEscrow(
+  roomId: string,
+): Promise<{ stakeYen: number; potYen: number; locked: boolean }> {
+  const { players, metadata } = await fetchRoomContext(roomId)
+  const stakeYen = Math.max(0, Math.floor(Number(metadata.stakeYen ?? 0)))
+
+  if (stakeYen <= 0) {
+    return { stakeYen: 0, potYen: 0, locked: false }
+  }
+  if (metadata.escrowLocked === true) {
+    return {
+      stakeYen,
+      potYen: Math.floor(Number(metadata.potYen ?? stakeYen * players.length)),
+      locked: true,
+    }
+  }
+
+  for (const p of players) {
+    const prof = p.profiles
+    if (prof && !prof.is_admin) {
+      const current = prof.yen_balance ?? DEFAULT_YEN_BALANCE
+      const nextBal = Math.max(0, current - stakeYen)
+      await supabase
+        .from('profiles')
+        .update({ yen_balance: nextBal, updated_at: new Date().toISOString() })
+        .eq('id', prof.id)
+    }
+  }
+
+  const potYen = stakeYen * Math.max(2, players.length)
+  const nextMetadata: Record<string, unknown> = {
+    ...metadata,
+    stakeYen,
+    potYen,
+    escrowLocked: true,
+    payoutSettled: false,
+  }
+
+  await supabase
+    .from('game_rooms')
+    .update({ metadata: nextMetadata as Json })
+    .eq('id', roomId)
+
+  return { stakeYen, potYen, locked: true }
+}
+
+export async function settleRoomPayout(
+  roomId: string,
+  winnerId: string | null,
+): Promise<{ settled: boolean; potYen: number; payoutType: 'win' | 'draw' | 'none' }> {
+  const { players, metadata } = await fetchRoomContext(roomId)
+  const stakeYen = Math.max(0, Math.floor(Number(metadata.stakeYen ?? 0)))
+  const potYen = Math.max(0, Math.floor(Number(metadata.potYen ?? stakeYen * players.length)))
+
+  if (stakeYen <= 0 || metadata.escrowLocked !== true || metadata.payoutSettled === true) {
+    return { settled: false, potYen: 0, payoutType: 'none' }
+  }
+
+  // Mark settled first for idempotency across refreshes
+  const settledMetadata: Record<string, unknown> = {
+    ...metadata,
+    payoutSettled: true,
+    payoutWinnerId: winnerId,
+    payoutType: !winnerId || winnerId === 'draw' ? 'draw' : 'win',
+  }
+
+  await supabase
+    .from('game_rooms')
+    .update({ metadata: settledMetadata as Json })
+    .eq('id', roomId)
+
+  if (!winnerId || winnerId === 'draw') {
+    for (const p of players) {
+      const prof = p.profiles
+      if (prof && !prof.is_admin) {
+        const current = prof.yen_balance ?? 0
+        await supabase
+          .from('profiles')
+          .update({ yen_balance: current + stakeYen, updated_at: new Date().toISOString() })
+          .eq('id', prof.id)
+      }
+    }
+    return { settled: true, potYen, payoutType: 'draw' }
+  }
+
+  const winnerRow = players.find((p) => p.user_id === winnerId)
+  if (winnerRow?.profiles && !winnerRow.profiles.is_admin) {
+    const current = winnerRow.profiles.yen_balance ?? 0
+    await supabase
+      .from('profiles')
+      .update({ yen_balance: current + potYen, updated_at: new Date().toISOString() })
+      .eq('id', winnerId)
+  }
+
+  return { settled: true, potYen, payoutType: 'win' }
+}
+
+export async function adminAdjustYenBalance(
+  targetUserId: string,
+  amount: number,
+  mode: 'add' | 'set' = 'add',
+): Promise<number> {
+  const clean = Math.floor(amount)
+  const { data: prof, error: fetchErr } = await supabase
+    .from('profiles')
+    .select('yen_balance')
+    .eq('id', targetUserId)
+    .single()
+
+  if (fetchErr) throw fetchErr
+  const current = (prof as { yen_balance?: number } | null)?.yen_balance ?? DEFAULT_YEN_BALANCE
+  const nextBalance = mode === 'set' ? Math.max(0, clean) : Math.max(0, current + clean)
+
+  const { error: updErr } = await supabase
+    .from('profiles')
+    .update({ yen_balance: nextBalance, updated_at: new Date().toISOString() })
+    .eq('id', targetUserId)
+
+  if (updErr) throw updErr
+  return nextBalance
+}
+
+export async function updatePlayerCardThemes(
+  userId: string,
+  themes: { card_front_theme?: string; card_back_theme?: string },
+): Promise<void> {
+  const { error } = await supabase
+    .from('profiles')
+    .update({
+      ...themes,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', userId)
+
+  if (error) throw error
+}

@@ -5,6 +5,7 @@ import { DEMO_GUEST_ID } from '@/lib/localSupabase'
 import { useRoom, lobbyKeys } from '@/hooks/useLobby'
 import { useAuth } from '@/hooks/useAuth'
 import { generateChecksum } from '@/platform/sync/syncEngine'
+import { getRoomPot, getRoomStake, lockRoomEscrow, settleRoomPayout } from '@/services/wallet/walletService'
 import { getGameBySlug } from '../registry'
 import type { BaseGameState } from '@/types/game'
 import type { Json } from '@/types/database'
@@ -12,6 +13,11 @@ import type { Json } from '@/types/database'
 interface UseGenericGameOptions<T extends BaseGameState> {
   gameSlug?: string
   createInitialState?: (playerIds: string[], hostId: string) => T
+}
+
+export interface PlayerCardThemeSelection {
+  frontThemeId?: string
+  backThemeId?: string
 }
 
 function isInitializedState<T extends BaseGameState>(meta: unknown): meta is T {
@@ -30,7 +36,7 @@ export function useGenericGame<T extends BaseGameState>(
 ) {
   const queryClient = useQueryClient()
   const { data: room, isLoading } = useRoom(roomId)
-  const { user } = useAuth()
+  const { user, refreshProfile } = useAuth()
 
   const initialFromRoom = isInitializedState<T>(room?.metadata) ? room.metadata : null
   const [gameState, setGameState] = useState<T | null>(initialFromRoom)
@@ -38,6 +44,8 @@ export function useGenericGame<T extends BaseGameState>(
   const metadataRef = useRef<unknown>(room?.metadata)
   const actionLockRef = useRef(false)
   const autoInitRef = useRef(false)
+  const escrowCheckRef = useRef(false)
+  const payoutCheckRef = useRef(false)
 
   useEffect(() => {
     metadataRef.current = room?.metadata
@@ -47,12 +55,23 @@ export function useGenericGame<T extends BaseGameState>(
   }, [room?.metadata])
 
   const playerProfiles = useMemo(() => {
-    const map: Record<string, { username: string; displayName: string; avatarUrl: string | null }> = {}
+    const map: Record<
+      string,
+      {
+        username: string
+        displayName: string
+        avatarUrl: string | null
+        clanTitle?: string | null
+        isAdmin?: boolean
+      }
+    > = {}
     for (const p of room?.players ?? []) {
       map[p.userId] = {
         username: p.profile.username,
         displayName: p.profile.display_name || p.profile.username,
         avatarUrl: p.profile.avatar_url,
+        clanTitle: p.profile.clan_title,
+        isAdmin: p.profile.is_admin,
       }
     }
     if (isLocalDemoMode && !map[DEMO_GUEST_ID]) {
@@ -60,10 +79,26 @@ export function useGenericGame<T extends BaseGameState>(
         username: 'sam_challenger',
         displayName: 'Sam Chen',
         avatarUrl: null,
+        clanTitle: 'Clan Jabami',
+        isAdmin: false,
       }
     }
     return map
   }, [room?.players])
+
+  const playerThemes = useMemo(() => {
+    const map: Record<string, PlayerCardThemeSelection> = {}
+    for (const p of room?.players ?? []) {
+      map[p.userId] = {
+        frontThemeId: p.profile.card_front_theme,
+        backThemeId: p.profile.card_back_theme,
+      }
+    }
+    return map
+  }, [room?.players])
+
+  const roomStakeYen = getRoomStake(room)
+  const roomPotYen = getRoomPot(room)
 
   const emitEvent = useCallback(
     async ({ type, payload }: { type: string; payload: Record<string, unknown> }) => {
@@ -214,6 +249,48 @@ export function useGenericGame<T extends BaseGameState>(
       })
   }, [room, user, isHost, options?.gameSlug, updateStateMutation, emitEvent])
 
+  // Lock Yen escrow once game starts (host only, idempotent)
+  useEffect(() => {
+    if (!roomId || !room || !isHost) return
+    if (roomStakeYen <= 0) return
+    if (room.metadata?.escrowLocked === true || escrowCheckRef.current) return
+
+    escrowCheckRef.current = true
+    void lockRoomEscrow(roomId)
+      .then(() => {
+        void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) })
+        void refreshProfile?.()
+      })
+      .catch(() => {
+        escrowCheckRef.current = false
+      })
+  }, [roomId, room, isHost, roomStakeYen, queryClient, refreshProfile])
+
+  // Settle Yen payout once game finishes (host only, idempotent)
+  useEffect(() => {
+    if (!roomId || !room || !isHost || !gameState) return
+    if (roomStakeYen <= 0) return
+    const isFinished = gameState.status === 'finished' || gameState.status === 'result'
+    // In Saving Throw, 'result' is just an intermediate round unless status === 'finished'
+    const gameEnded =
+      room.gameSlug === 'saving-throw' ? gameState.status === 'finished' : isFinished
+    if (!gameEnded) return
+    if (room.metadata?.payoutSettled === true || payoutCheckRef.current) return
+
+    const rawState = gameState as unknown as Record<string, unknown>
+    const winnerId = (rawState.winnerId ?? rawState.gameWinnerId ?? null) as string | null
+
+    payoutCheckRef.current = true
+    void settleRoomPayout(roomId, winnerId)
+      .then(() => {
+        void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) })
+        void refreshProfile?.()
+      })
+      .catch(() => {
+        payoutCheckRef.current = false
+      })
+  }, [roomId, room, isHost, gameState, roomStakeYen, queryClient, refreshProfile])
+
   const resetMatch = useCallback(async () => {
     if (!room || !isHost) return
     const playerIds = room.players.map((p) => p.userId)
@@ -225,7 +302,13 @@ export function useGenericGame<T extends BaseGameState>(
       ? createInitialRef.current(playerIds, room.hostId)
       : (plugin?.launch?.(playerIds) as T | undefined)
     if (!fresh) return
-    await updateStateMutation.mutateAsync(fresh)
+    escrowCheckRef.current = false
+    payoutCheckRef.current = false
+    await updateStateMutation.mutateAsync({
+      ...fresh,
+      escrowLocked: false,
+      payoutSettled: false,
+    } as Partial<T>)
     await emitEvent({ type: 'game_started', payload: { players: playerIds, rematch: true } })
   }, [room, isHost, options?.gameSlug, updateStateMutation, emitEvent])
 
@@ -235,6 +318,9 @@ export function useGenericGame<T extends BaseGameState>(
     isLoading,
     isHost,
     playerProfiles,
+    playerThemes,
+    roomStakeYen,
+    roomPotYen,
     updateGameState: updateStateMutation.mutateAsync,
     isUpdating: updateStateMutation.isPending,
     emitEvent,

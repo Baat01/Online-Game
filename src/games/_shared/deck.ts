@@ -12,6 +12,7 @@ export interface Card {
   isHidden?: boolean
   currentValue?: number
   effectLabel?: string
+  ownerId?: string
 }
 
 const SUITS: Suit[] = ['hearts', 'diamonds', 'clubs', 'spades']

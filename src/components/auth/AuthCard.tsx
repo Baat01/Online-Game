@@ -26,10 +26,13 @@ export function AuthCard({ title, subtitle, children, footer }: AuthCardProps) {
         <div className="flex flex-col items-center mb-8">
           <Link
             to="/"
-            className="flex items-center gap-2 text-slate-100 no-underline font-bold text-xl mb-1 hover:text-brand-400 transition-colors"
+            className="flex items-center gap-2 text-slate-100 no-underline font-bold text-xl mb-1 hover:text-gold-400 transition-colors"
           >
-            <Spade className="size-7 text-brand-400 fill-brand-400" aria-hidden="true" />
-            CardArena
+            <Spade className="size-7 text-brand-500 fill-brand-500" aria-hidden="true" />
+            <span>ENGEI</span>
+            <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-gold-500/15 border border-gold-500/35 text-gold-400">
+              宴芸
+            </span>
           </Link>
           <h1 className="text-2xl font-bold text-slate-100 mt-4 text-center">{title}</h1>
           {subtitle && (

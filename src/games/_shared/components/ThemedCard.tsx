@@ -1,6 +1,14 @@
 import { clsx } from 'clsx'
+import { useOptionalAuthContext } from '@/contexts/AuthContext'
 import type { Rank, Suit } from '../deck'
-import { useCardTheme, type CardThemeConfig } from '../themes'
+import {
+  resolveBackTheme,
+  resolveFrontTheme,
+  useCardTheme,
+  type CardBackThemeId,
+  type CardFrontThemeId,
+  type CardFrontThemeConfig,
+} from '../themes'
 
 export interface ThemedCardProps {
   suit?: Suit
@@ -13,7 +21,8 @@ export interface ThemedCardProps {
   modifierBadge?: string
   seasonLabel?: string
   onClick?: () => void
-  themeOverride?: CardThemeConfig
+  frontThemeId?: CardFrontThemeId | string
+  backThemeId?: CardBackThemeId | string
   className?: string
   ariaLabel?: string
 }
@@ -53,10 +62,9 @@ function SuitGlyph({ suit, className }: { suit: Suit; className?: string }) {
   }
 }
 
-function CourtBadge({ rank, theme }: { rank: string; theme: CardThemeConfig }) {
+function CourtBadge({ rank, theme }: { rank: string; theme: CardFrontThemeConfig }) {
   if (!['J', 'Q', 'K', 'A'].includes(rank)) return null
-  const label =
-    rank === 'K' ? '👑' : rank === 'Q' ? '✦' : rank === 'J' ? '⚔' : '★'
+  const label = rank === 'K' ? '👑' : rank === 'Q' ? '✦' : rank === 'J' ? '⚔' : '★'
 
   return (
     <span
@@ -81,24 +89,32 @@ export function ThemedCard({
   modifierBadge,
   seasonLabel,
   onClick,
-  themeOverride,
+  frontThemeId,
+  backThemeId,
   className,
   ariaLabel,
 }: ThemedCardProps) {
-  const { theme: storeTheme } = useCardTheme()
-  const theme = themeOverride ?? storeTheme
-  const isInteractive = Boolean(onClick && playable && !disabled)
+  const auth = useOptionalAuthContext()
+  const { frontThemeId: storeFrontId, backThemeId: storeBackId } = useCardTheme()
 
-  const suitClass = theme.suitColorClass[suit]
+  const frontTheme = resolveFrontTheme(
+    frontThemeId ?? auth?.profile?.card_front_theme ?? storeFrontId,
+  )
+  const backTheme = resolveBackTheme(
+    backThemeId ?? auth?.profile?.card_back_theme ?? storeBackId,
+  )
+
+  const isInteractive = Boolean(onClick && playable && !disabled)
+  const suitClass = frontTheme.suitColorClass[suit]
   const sizeClass = SIZE_CLASSES[size]
 
   const baseClasses = clsx(
     'relative select-none border-2 flex flex-col justify-between transition-all duration-200 motion-reduce:transition-none',
     sizeClass,
-    isHidden ? theme.backContainerClass : theme.faceContainerClass,
-    playable && !disabled && theme.playableRingClass,
+    isHidden ? backTheme.backContainerClass : frontTheme.faceContainerClass,
+    playable && !disabled && frontTheme.playableRingClass,
     isInteractive && 'cursor-pointer hover:-translate-y-2 focus-visible:outline-none',
-    selected && '-translate-y-2 ring-2 ring-brand-400',
+    selected && '-translate-y-2 ring-2 ring-amber-400',
     disabled && !isHidden && 'opacity-55 saturate-50 cursor-not-allowed',
     className,
   )
@@ -106,15 +122,15 @@ export function ThemedCard({
   const content = isHidden ? (
     <div
       className="w-full h-full rounded-md border border-white/20 flex items-center justify-center overflow-hidden"
-      style={theme.backPatternStyle}
+      style={backTheme.backPatternStyle}
     >
       <div
         className={clsx(
-          'size-8 rounded-full border border-current/30 flex items-center justify-center bg-black/20 backdrop-blur-[1px]',
-          theme.backEmblemColor,
+          'size-8 rounded-full border border-current/40 flex items-center justify-center bg-black/30 backdrop-blur-[1px] font-bold text-sm',
+          backTheme.backEmblemColor,
         )}
       >
-        <SuitGlyph suit="spades" className="size-4" />
+        {backTheme.emblemSymbol}
       </div>
     </div>
   ) : (
@@ -125,16 +141,14 @@ export function ThemedCard({
           <span>{rank}</span>
           <SuitGlyph suit={suit} className={size === 'sm' ? 'size-2.5 mt-0.5' : 'size-3.5 mt-0.5'} />
         </div>
-        <CourtBadge rank={String(rank)} theme={theme} />
+        <CourtBadge rank={String(rank)} theme={frontTheme} />
       </div>
 
       {/* Center pip */}
       <div className={clsx('flex flex-col items-center justify-center my-auto', suitClass)}>
         <SuitGlyph
           suit={suit}
-          className={
-            size === 'sm' ? 'size-5' : size === 'lg' ? 'size-10' : 'size-7'
-          }
+          className={size === 'sm' ? 'size-5' : size === 'lg' ? 'size-10' : 'size-7'}
         />
         {seasonLabel && (
           <span className="mt-0.5 text-[9px] font-semibold uppercase tracking-wider opacity-80">
@@ -178,6 +192,8 @@ export function ThemedCard({
         type="button"
         onClick={isInteractive ? onClick : undefined}
         disabled={!isInteractive}
+        data-front-theme={frontTheme.id}
+        data-back-theme={backTheme.id}
         aria-label={ariaLabel ?? (isHidden ? 'Hidden card' : `${rank} of ${suit}`)}
         className={baseClasses}
       >
@@ -188,6 +204,8 @@ export function ThemedCard({
 
   return (
     <div
+      data-front-theme={frontTheme.id}
+      data-back-theme={backTheme.id}
       aria-label={ariaLabel ?? (isHidden ? 'Hidden card' : `${rank} of ${suit}`)}
       className={baseClasses}
     >

@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { clsx } from 'clsx'
-import { Spade, Home, Users, Gamepad2, Moon, Sun, LogIn, UserPlus, LogOut } from 'lucide-react'
+import { Spade, Home, Users, Gamepad2, Moon, Sun, LogIn, UserPlus, LogOut, Coins, Shield } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTheme } from '@/hooks/useTheme'
 import { useAuth } from '@/hooks/useAuth'
@@ -10,6 +10,7 @@ import { Spinner } from '@/components/ui/Spinner'
 import { friendKeys } from '@/hooks/useFriends'
 import { lobbyKeys } from '@/hooks/useLobby'
 import { useSelfPresence } from '@/hooks/useSelfPresence'
+import { formatYen, DEFAULT_YEN_BALANCE } from '@/services/wallet/walletService'
 import type { FriendRequest } from '@/types/friends'
 import type { GameInvitation } from '@/types/lobby'
 
@@ -60,10 +61,13 @@ export function RootLayout() {
           {/* Logo */}
           <NavLink
             to="/"
-            className="flex items-center gap-2 text-slate-100 no-underline font-bold text-lg hover:text-brand-400"
+            className="flex items-center gap-2 text-slate-100 no-underline font-bold text-lg hover:text-gold-400"
           >
-            <Spade className="size-6 text-brand-400 fill-brand-400" aria-hidden="true" />
-            CardArena
+            <Spade className="size-6 text-brand-500 fill-brand-500" aria-hidden="true" />
+            <span>ENGEI</span>
+            <span className="hidden sm:inline text-[11px] font-semibold px-1.5 py-0.5 rounded bg-gold-500/15 border border-gold-500/35 text-gold-400">
+              宴芸
+            </span>
           </NavLink>
 
           {/* Nav Links (desktop) */}
@@ -123,9 +127,31 @@ export function RootLayout() {
             ) : user ? (
               /* Logged-in user chip — clicking goes to /profile */
               <div className="flex items-center gap-2">
+                {/* Banque des 6 Lances Yen Wallet */}
                 <NavLink
                   to="/profile"
-                  className="hidden sm:flex items-center gap-2 px-2 py-1 rounded-btn bg-surface-700 border border-surface-600 no-underline hover:border-brand-500/60 transition-colors"
+                  title="Banque des 6 Lances — Voir mon solde et mes cartes"
+                  className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-btn bg-gold-500/10 border border-gold-500/30 text-gold-300 text-xs font-mono font-semibold no-underline hover:border-gold-400/60 transition-colors"
+                >
+                  <Coins className="size-3.5 text-gold-400" aria-hidden="true" />
+                  <span>
+                    {formatYen(
+                      profile?.yen_balance ?? DEFAULT_YEN_BALANCE,
+                      Boolean(profile?.is_admin),
+                      true,
+                    )}
+                  </span>
+                  {profile?.is_admin && (
+                    <span className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-brand-500/20 text-brand-300 font-sans text-[10px] font-bold">
+                      <Shield className="size-2.5" aria-hidden="true" />
+                      Admin
+                    </span>
+                  )}
+                </NavLink>
+
+                <NavLink
+                  to="/profile"
+                  className="hidden sm:flex items-center gap-2 px-2 py-1 rounded-btn bg-surface-700 border border-surface-600 no-underline hover:border-gold-500/60 transition-colors"
                   aria-label="View your profile"
                 >
                   {/* Avatar circle with presence dot */}
@@ -232,7 +258,7 @@ export function RootLayout() {
 
       {/* ── Footer ── */}
       <footer className="border-t border-surface-700 py-4 text-center text-xs text-slate-500">
-        CardArena © {new Date().getFullYear()} — Play with friends
+        ENGEI 宴芸 © {new Date().getFullYear()} — Cercle Bami &amp; Banque des 6 Lances
       </footer>
     </div>
   )

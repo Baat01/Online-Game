@@ -29,6 +29,7 @@ export function SavingThrowPage() {
     gameState,
     isHost,
     playerProfiles,
+    roomPotYen,
     updateGameState,
     emitEvent,
     isUpdating,
@@ -145,6 +146,7 @@ export function SavingThrowPage() {
         gameState={gameState}
         currentUserId={user?.id}
         playerProfiles={playerProfiles}
+        potYen={roomPotYen}
         onBackToLobby={() => navigate(`/room/${roomId}`)}
       />
 
@@ -152,6 +154,7 @@ export function SavingThrowPage() {
         gameState={gameState}
         currentUserId={user?.id}
         playerProfiles={playerProfiles}
+        potYen={roomPotYen}
       />
 
       <ActionBar

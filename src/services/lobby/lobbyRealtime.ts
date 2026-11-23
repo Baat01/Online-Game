@@ -24,6 +24,19 @@ import type { GameInvitation, RoomCallbacks, InvitationCallback } from '@/types/
  *
  * Returns an unsubscribe function — call it on component unmount.
  */
+function mapRoomPayload(row: Record<string, unknown>): Partial<import('@/types/lobby').GameRoom> {
+  const partial: Partial<import('@/types/lobby').GameRoom> = {}
+  if (typeof row.state === 'string') partial.state = row.state as import('@/types/lobby').RoomState
+  if (typeof row.max_players === 'number') partial.maxPlayers = row.max_players
+  if (typeof row.host_id === 'string') partial.hostId = row.host_id
+  if (typeof row.game_slug === 'string') partial.gameSlug = row.game_slug
+  if ('started_at' in row) partial.startedAt = (row.started_at as string | null) ?? null
+  if ('metadata' in row && row.metadata && typeof row.metadata === 'object') {
+    partial.metadata = row.metadata as Record<string, unknown>
+  }
+  return partial
+}
+
 export function subscribeToRoom(roomId: string, callbacks: RoomCallbacks): () => void {
   const channel: RealtimeChannel = supabase
     .channel(`room:${roomId}`)
@@ -36,7 +49,8 @@ export function subscribeToRoom(roomId: string, callbacks: RoomCallbacks): () =>
         filter: `id=eq.${roomId}`,
       },
       (payload) => {
-        callbacks.onRoomChange(payload.new as Partial<import('@/types/lobby').GameRoom>)
+        const mapped = mapRoomPayload((payload.new ?? {}) as Record<string, unknown>)
+        callbacks.onRoomChange(mapped)
       },
     )
     .on(
@@ -49,6 +63,17 @@ export function subscribeToRoom(roomId: string, callbacks: RoomCallbacks): () =>
       },
       () => {
         // Trigger a full players refresh — simpler than partial updates
+        callbacks.onPlayersChange()
+      },
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'profiles',
+      },
+      () => {
         callbacks.onPlayersChange()
       },
     )

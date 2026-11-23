@@ -1,5 +1,6 @@
 import { clsx } from 'clsx'
 import { ThemedCard } from '../../_shared/components'
+import type { PlayerCardThemeSelection } from '../../_shared/useGenericGame'
 import type { TwistPlayer } from '../engine/twistEngine'
 
 interface PlayerAreaProps {
@@ -8,6 +9,7 @@ interface PlayerAreaProps {
   isMe: boolean
   isCurrentTurn: boolean
   isWinner: boolean
+  playerThemes?: Record<string, PlayerCardThemeSelection>
 }
 
 export function PlayerArea({
@@ -16,6 +18,7 @@ export function PlayerArea({
   isMe,
   isCurrentTurn,
   isWinner,
+  playerThemes = {},
 }: PlayerAreaProps) {
   return (
     <section
@@ -71,16 +74,22 @@ export function PlayerArea({
 
       {/* Hand */}
       <div className="flex flex-wrap gap-2.5 min-h-[7.5rem] items-center">
-        {player.hand.map((card, i) => (
-          <ThemedCard
-            key={`${card.id}-${i}`}
-            suit={card.suit}
-            rank={card.rank}
-            size="sm"
-            modifierBadge={card.effectLabel}
-            className="animate-deal-card"
-          />
-        ))}
+        {player.hand.map((card, i) => {
+          const cardOwnerId = card.ownerId ?? player.userId
+          const ownerTheme = playerThemes[cardOwnerId]
+          return (
+            <ThemedCard
+              key={`${card.id}-${i}`}
+              suit={card.suit}
+              rank={card.rank}
+              size="sm"
+              modifierBadge={card.effectLabel}
+              frontThemeId={ownerTheme?.frontThemeId}
+              backThemeId={ownerTheme?.backThemeId}
+              className="animate-deal-card"
+            />
+          )
+        })}
       </div>
     </section>
   )

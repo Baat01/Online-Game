@@ -1,11 +1,14 @@
 import { useState } from 'react'
-import { Gamepad2 } from 'lucide-react'
+import { Gamepad2, Coins } from 'lucide-react'
 import { GAME_REGISTRY } from '@/games/registry'
 import { useToast } from '@/components/ui/Toast'
 import { useLobby } from '@/hooks/useLobby'
+import { useAuth } from '@/hooks/useAuth'
 import { GameCard } from '@/components/lobby/GameCard'
 import { InvitationCenter } from '@/components/lobby/InvitationCenter'
 import { GamesPageSkeleton } from '@/components/lobby/LobbySkeleton'
+import { CardThemeSelector } from '@/games/_shared/components'
+import { DEFAULT_YEN_BALANCE, formatYen } from '@/services/wallet/walletService'
 
 /**
  * Games page — /games (protected).
@@ -25,6 +28,7 @@ export function GamesPage() {
   } = useLobby()
 
   const { toast } = useToast()
+  const { profile } = useAuth()
   const [creatingSlug, setCreatingSlug] = useState<string | null>(null)
   const [pendingAccept, setPendingAccept] = useState<string | null>(null)
   const [pendingDecline, setPendingDecline] = useState<string | null>(null)
@@ -70,12 +74,33 @@ export function GamesPage() {
   return (
     <div className="max-w-5xl mx-auto px-4 py-8 sm:py-12 animate-fade-in">
       {/* Page header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-2 mb-1">
-          <Gamepad2 className="size-5 text-brand-400" aria-hidden="true" />
-          <h1 className="text-2xl font-bold text-slate-100">Games</h1>
+      <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Gamepad2 className="size-5 text-brand-400" aria-hidden="true" />
+            <h1 className="text-2xl font-bold text-slate-100">Games</h1>
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gold-500/10 border border-gold-500/30 text-gold-300">
+              Cercle Engei 宴芸
+            </span>
+          </div>
+          <p className="text-sm text-slate-400">
+            Choisissez une table, invitez un rival et fixez une mise à la Banque des 6 Lances (ou jouez à 0 ¥).
+          </p>
         </div>
-        <p className="text-sm text-slate-500">Choose a game and create a private room for you and your friends.</p>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-btn bg-surface-800 border border-gold-500/30 text-gold-300 text-xs font-mono font-semibold">
+            <Coins className="size-3.5 text-gold-400" aria-hidden="true" />
+            <span>
+              {formatYen(
+                profile?.yen_balance ?? DEFAULT_YEN_BALANCE,
+                Boolean(profile?.is_admin),
+                true,
+              )}
+            </span>
+          </div>
+          <CardThemeSelector mode="modal" />
+        </div>
       </div>
 
       {/* Pending invitations */}

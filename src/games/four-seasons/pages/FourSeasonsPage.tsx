@@ -28,6 +28,8 @@ export function FourSeasonsPage() {
     gameState,
     isHost,
     playerProfiles,
+    playerThemes,
+    roomPotYen,
     updateGameState,
     emitEvent,
     isUpdating,
@@ -115,6 +117,8 @@ export function FourSeasonsPage() {
         gameState={gameState}
         currentUserId={user?.id}
         playerProfiles={playerProfiles}
+        playerThemes={playerThemes}
+        potYen={roomPotYen}
         pendingKingCardId={pendingKingCardId}
         onPlayCard={(cardId) => void handlePlayCard(cardId)}
         onDrawCard={() => void handleDraw()}

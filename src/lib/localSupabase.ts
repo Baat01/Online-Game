@@ -3,12 +3,14 @@
  *
  * Used automatically when VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are unset or
  * still pointing at placeholder values, enabling full local multiplayer testing
- * across browser tabs (via localStorage + BroadcastChannel) without a remote DB.
+ * across browser tabs (via localStorage + BroadcastChannel + storage events)
+ * without a remote DB.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
 
 const STORAGE_KEY = 'card_arena_local_db_v1'
+const LAST_EVENT_KEY = 'card_arena_local_db_event_v1'
 const CHANNEL_NAME = 'card_arena_realtime_v1'
 const ACTIVE_USER_SESSION_KEY = 'card_arena_active_user_id'
 
@@ -42,8 +44,8 @@ function createInitialDb(): LocalDbState {
   const ts = nowIso()
   return {
     users: [
-      { id: DEMO_HOST_ID, email: 'alex@cardarena.local', password: 'password123', username: 'alex_host' },
-      { id: DEMO_GUEST_ID, email: 'sam@cardarena.local', password: 'password123', username: 'sam_challenger' },
+      { id: DEMO_HOST_ID, email: 'alex@engei.local', password: 'password123', username: 'alex_host' },
+      { id: DEMO_GUEST_ID, email: 'sam@engei.local', password: 'password123', username: 'sam_challenger' },
     ],
     tables: {
       profiles: [
@@ -51,23 +53,33 @@ function createInitialDb(): LocalDbState {
           id: DEMO_HOST_ID,
           username: 'alex_host',
           display_name: 'Alex Rivera',
-          bio: 'Host & Card Strategist',
+          bio: 'Conseil Bami — Trésorier de la Banque des 6 Lances',
           avatar_url: null,
           is_online: true,
           last_seen: ts,
           created_at: ts,
           updated_at: ts,
+          yen_balance: 500000,
+          is_admin: true,
+          clan_title: 'Clan Momobami',
+          card_back_theme: 'bami-gold',
+          card_front_theme: 'royal-fantasy',
         },
         {
           id: DEMO_GUEST_ID,
           username: 'sam_challenger',
           display_name: 'Sam Chen',
-          bio: 'Challenger & Dice Roller',
+          bio: 'Élève de l’Académie Engei — Joueur de haut vol',
           avatar_url: null,
           is_online: true,
           last_seen: ts,
           created_at: ts,
           updated_at: ts,
+          yen_balance: 10000,
+          is_admin: false,
+          clan_title: 'Clan Jabami',
+          card_back_theme: 'engei-crimson',
+          card_front_theme: 'classic',
         },
       ],
       presence: [
@@ -135,6 +147,17 @@ function createInitialDb(): LocalDbState {
   }
 }
 
+function hydrateProfileDefaults(profile: Row): Row {
+  return {
+    yen_balance: profile.id === DEMO_HOST_ID ? 500000 : 10000,
+    is_admin: profile.id === DEMO_HOST_ID,
+    clan_title: profile.id === DEMO_HOST_ID ? 'Clan Momobami' : 'Clan Jabami',
+    card_back_theme: profile.id === DEMO_HOST_ID ? 'bami-gold' : 'engei-crimson',
+    card_front_theme: profile.id === DEMO_HOST_ID ? 'royal-fantasy' : 'classic',
+    ...profile,
+  }
+}
+
 function loadDb(): LocalDbState {
   if (typeof window === 'undefined' || !window.localStorage) {
     return createInitialDb()
@@ -148,6 +171,9 @@ function loadDb(): LocalDbState {
     }
     const parsed = JSON.parse(raw) as LocalDbState
     if (!parsed.tables) return createInitialDb()
+    if (Array.isArray(parsed.tables.profiles)) {
+      parsed.tables.profiles = parsed.tables.profiles.map(hydrateProfileDefaults)
+    }
     return parsed
   } catch {
     return createInitialDb()
@@ -165,7 +191,6 @@ function saveDb(db: LocalDbState): void {
 
 export function getActiveDemoUserId(): string | null {
   if (typeof window === 'undefined') return DEMO_HOST_ID
-  // Allow URL query ?player=2 to open a tab directly as Player 2
   const params = new URLSearchParams(window.location.search)
   const playerParam = params.get('player')
   if (playerParam === '2') {
@@ -186,9 +211,10 @@ export function setActiveDemoUserId(userId: string | null): void {
   window.sessionStorage.setItem(ACTIVE_USER_SESSION_KEY, userId ?? 'signed_out')
 }
 
-// ── Realtime Event Bus (same-tab + cross-tab via BroadcastChannel) ──
+// ── Realtime Event Bus (same-tab + cross-tab via BroadcastChannel & storage events) ──
 
 interface DbChangeEvent {
+  eventId: string
   table: string
   eventType: 'INSERT' | 'UPDATE' | 'DELETE'
   new: Row | null
@@ -203,10 +229,20 @@ type ChannelListener = {
 }
 
 const activeChannels = new Set<{ name: string; listeners: ChannelListener[] }>()
+const processedEventIds = new Set<string>()
 let bc: BroadcastChannel | null = null
 
 function dispatchChangeToChannels(ev: DbChangeEvent): void {
-  for (const ch of activeChannels) {
+  if (ev.eventId) {
+    if (processedEventIds.has(ev.eventId)) return
+    processedEventIds.add(ev.eventId)
+    if (processedEventIds.size > 300) {
+      const first = processedEventIds.values().next().value
+      if (first) processedEventIds.delete(first)
+    }
+  }
+
+  for (const ch of Array.from(activeChannels)) {
     for (const l of ch.listeners) {
       if (l.table !== ev.table) continue
       if (l.event !== '*' && l.event !== ev.eventType) continue
@@ -227,22 +263,48 @@ function dispatchChangeToChannels(ev: DbChangeEvent): void {
   }
 }
 
-if (typeof window !== 'undefined' && typeof BroadcastChannel !== 'undefined') {
-  bc = new BroadcastChannel(CHANNEL_NAME)
-  bc.onmessage = (event) => {
-    const data = event.data as DbChangeEvent | undefined
-    if (data && data.table) {
-      dispatchChangeToChannels(data)
+if (typeof window !== 'undefined') {
+  if (typeof BroadcastChannel !== 'undefined') {
+    bc = new BroadcastChannel(CHANNEL_NAME)
+    bc.onmessage = (event) => {
+      const data = event.data as DbChangeEvent | undefined
+      if (data && data.table) {
+        dispatchChangeToChannels(data)
+      }
     }
   }
+
+  window.addEventListener('storage', (event) => {
+    if (event.key === LAST_EVENT_KEY && event.newValue) {
+      try {
+        const parsed = JSON.parse(event.newValue) as DbChangeEvent
+        if (parsed && parsed.table) {
+          dispatchChangeToChannels(parsed)
+        }
+      } catch {
+        // Ignore malformed storage events
+      }
+    }
+  })
 }
 
-function emitDbChange(ev: DbChangeEvent): void {
-  dispatchChangeToChannels(ev)
+function emitDbChange(ev: Omit<DbChangeEvent, 'eventId'>): void {
+  const fullEvent: DbChangeEvent = {
+    ...ev,
+    eventId: makeUuid(),
+  }
+  dispatchChangeToChannels(fullEvent)
   try {
-    bc?.postMessage(ev)
+    bc?.postMessage(fullEvent)
   } catch {
     // Ignore postMessage issues
+  }
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      window.localStorage.setItem(LAST_EVENT_KEY, JSON.stringify(fullEvent))
+    } catch {
+      // Ignore quota errors
+    }
   }
 }
 
@@ -278,30 +340,26 @@ export function switchDemoPlayer(userId: string): void {
   notifyAuthChange('SIGNED_IN')
 }
 
-// ── Relation Resolver for .select('..., alias:table!fk(...)') ──
+// ── Relation Resolver ──
 
 function resolveRelations(row: Row, selectExpr: string, db: LocalDbState): Row {
   const result: Row = { ...row }
 
-  // friend_profile:profiles!friends_friend_id_fkey(...)
   if (selectExpr.includes('friend_profile:')) {
     const prof = (db.tables.profiles ?? []).find((p) => p.id === row.friend_id) ?? null
-    result.friend_profile = prof
+    result.friend_profile = prof ? hydrateProfileDefaults(prof) : null
   }
-  // sender_profile:profiles!...
   if (selectExpr.includes('sender_profile:')) {
     const prof = (db.tables.profiles ?? []).find((p) => p.id === row.sender_id) ?? null
-    result.sender_profile = prof
+    result.sender_profile = prof ? hydrateProfileDefaults(prof) : null
   }
-  // receiver_profile:profiles!...
   if (selectExpr.includes('receiver_profile:')) {
     const prof = (db.tables.profiles ?? []).find((p) => p.id === row.receiver_id) ?? null
-    result.receiver_profile = prof
+    result.receiver_profile = prof ? hydrateProfileDefaults(prof) : null
   }
-  // room_players -> profiles!inner(...) or rankings -> profiles(...)
   if (selectExpr.includes('profiles')) {
     const prof = (db.tables.profiles ?? []).find((p) => p.id === row.user_id) ?? null
-    result.profiles = prof
+    result.profiles = prof ? hydrateProfileDefaults(prof) : null
   }
 
   return result
@@ -335,7 +393,12 @@ function recalculateRoomReadyState(roomId: string, db: LocalDbState): void {
   const players = db.tables.room_players.filter((rp) => rp.room_id === roomId)
   const total = players.length
   const readyCount = players.filter((rp) => rp.ready === true).length
-  const nextState = total >= 2 && readyCount === total ? 'ready' : total < 2 || readyCount < total ? 'waiting' : room.state
+  const nextState =
+    total >= 2 && readyCount === total
+      ? 'ready'
+      : total < 2 || readyCount < total
+        ? 'waiting'
+        : room.state
   if (room.state !== nextState && (nextState === 'ready' || room.state === 'ready')) {
     const oldRoom = { ...room }
     room.state = nextState
@@ -519,6 +582,16 @@ class LocalQueryBuilder {
 
     if (this.op === 'insert') {
       const items = Array.isArray(this.payload) ? this.payload : [this.payload!]
+
+      // Prevent duplicate (room_id, user_id) in room_players
+      if (this.table === 'room_players') {
+        for (const item of items) {
+          if (rows.some((r) => r.room_id === item.room_id && r.user_id === item.user_id)) {
+            return { data: null, error: { message: 'Already in room', code: '23505' } }
+          }
+        }
+      }
+
       const inserted: Row[] = items.map((item) => {
         const row: Row = {
           id: item.id ?? makeUuid(),
@@ -598,16 +671,29 @@ class LocalQueryBuilder {
     if (this.op === 'update') {
       const updates = this.payload as Row
       const updatedRows: Row[] = []
+      const changeEvents: Array<Omit<DbChangeEvent, 'eventId'>> = []
+      const postTriggers: Array<{ updated: Row; old: Row }> = []
+
       for (let i = 0; i < rows.length; i++) {
         if (this.filters.every((fn) => fn(rows[i]))) {
           const old = { ...rows[i] }
           rows[i] = { ...rows[i], ...updates }
           updatedRows.push(rows[i])
-          saveDb(db)
-          applyUpdateTriggers(this.table, rows[i], old, db)
-          emitDbChange({ table: this.table, eventType: 'UPDATE', new: { ...rows[i] }, old })
+          postTriggers.push({ updated: rows[i], old })
+          changeEvents.push({ table: this.table, eventType: 'UPDATE', new: { ...rows[i] }, old })
         }
       }
+
+      if (updatedRows.length > 0) {
+        saveDb(db)
+        for (const t of postTriggers) {
+          applyUpdateTriggers(this.table, t.updated, t.old, db)
+        }
+        for (const ev of changeEvents) {
+          emitDbChange(ev)
+        }
+      }
+
       if (this.resultMode === 'single') {
         if (updatedRows.length === 0) {
           return { data: null, error: { message: 'No rows updated', code: 'PGRST116' } }
@@ -653,7 +739,6 @@ class LocalQueryBuilder {
 }
 
 export function createLocalSupabaseClient(): SupabaseClient<Database> {
-  // Ensure DB is initialized on first access
   loadDb()
 
   const client = {
@@ -691,7 +776,15 @@ export function createLocalSupabaseClient(): SupabaseClient<Database> {
         notifyAuthChange('SIGNED_IN')
         return { data: { user, session: buildSessionForUser(user.id) }, error: null }
       },
-      async signUp({ email, password, options }: { email: string; password: string; options?: { data?: { username?: string } } }) {
+      async signUp({
+        email,
+        password,
+        options,
+      }: {
+        email: string
+        password: string
+        options?: { data?: { username?: string } }
+      }) {
         const db = loadDb()
         if (db.users.some((u) => u.email.toLowerCase() === email.toLowerCase())) {
           return { data: { user: null, session: null }, error: new Error('User already registered') }
@@ -710,6 +803,11 @@ export function createLocalSupabaseClient(): SupabaseClient<Database> {
           last_seen: ts,
           created_at: ts,
           updated_at: ts,
+          yen_balance: 10000,
+          is_admin: false,
+          clan_title: 'Académie Engei',
+          card_back_theme: 'engei-crimson',
+          card_front_theme: 'classic',
         })
         db.tables.presence.push({ user_id: id, is_online: true, last_seen: ts })
         saveDb(db)

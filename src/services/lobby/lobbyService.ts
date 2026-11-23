@@ -54,6 +54,11 @@ function toRoomPlayer(row: {
     username: string
     display_name: string | null
     avatar_url: string | null
+    yen_balance?: number
+    is_admin?: boolean
+    clan_title?: string | null
+    card_back_theme?: string
+    card_front_theme?: string
   } | null
 }): RoomPlayer {
   return {
@@ -179,7 +184,12 @@ export async function getRoom(roomId: string): Promise<GameRoom> {
         id,
         username,
         display_name,
-        avatar_url
+        avatar_url,
+        yen_balance,
+        is_admin,
+        clan_title,
+        card_back_theme,
+        card_front_theme
       )
     `)
     .eq('room_id', roomId)

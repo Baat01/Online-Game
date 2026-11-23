@@ -27,6 +27,8 @@ export function BlackjackTwistPage() {
     gameState,
     isHost,
     playerProfiles,
+    playerThemes,
+    roomPotYen,
     updateGameState,
     emitEvent,
     isUpdating,
@@ -100,6 +102,8 @@ export function BlackjackTwistPage() {
         gameState={gameState}
         currentUserId={user?.id}
         playerProfiles={playerProfiles}
+        playerThemes={playerThemes}
+        potYen={roomPotYen}
       />
 
       <ActionBar

@@ -27,18 +27,26 @@ vi.mock('@/hooks/useAuth', () => ({
   useAuth: () => ({
     user: {
       id: currentTestUserId,
-      email: currentTestUserId === DEMO_HOST_ID ? 'alex@cardarena.local' : 'sam@cardarena.local',
+      email: currentTestUserId === DEMO_HOST_ID ? 'alex@engei.local' : 'sam@engei.local',
     },
     profile: {
       id: currentTestUserId,
       username: currentTestUserId === DEMO_HOST_ID ? 'alex_host' : 'sam_challenger',
       display_name: currentTestUserId === DEMO_HOST_ID ? 'Alex Rivera' : 'Sam Chen',
       avatar_url: null,
+      yen_balance: currentTestUserId === DEMO_HOST_ID ? 500000 : 10000,
+      is_admin: currentTestUserId === DEMO_HOST_ID,
+      clan_title: currentTestUserId === DEMO_HOST_ID ? 'Clan Momobami' : 'Clan Jabami',
+      card_back_theme: currentTestUserId === DEMO_HOST_ID ? 'bami-gold' : 'engei-crimson',
+      card_front_theme: currentTestUserId === DEMO_HOST_ID ? 'royal-fantasy' : 'classic',
     },
     loading: false,
+    refreshProfile: vi.fn().mockResolvedValue(undefined),
   }),
 }))
 
+import { ToastProvider } from '@/components/ui/Toast'
+import { GameRoomPage } from '@/pages/GameRoomPage'
 import { SavingThrowPage } from '../saving-throw/pages/SavingThrowPage'
 import { BlackjackTwistPage } from '../blackjack-twist/pages/BlackjackTwistPage'
 import { FourSeasonsPage } from '../four-seasons/pages/FourSeasonsPage'
@@ -55,11 +63,14 @@ function renderGameRoute(pathPattern: string, initialEntry: string, element: Rea
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <QueryClientProvider client={queryClient}>
-        <Routes>
-          <Route path={pathPattern} element={element} />
-          <Route path="/room/:roomId" element={<div>Room Lobby</div>} />
-          <Route path="/games" element={<div>Games Catalog</div>} />
-        </Routes>
+        <ToastProvider>
+          <Routes>
+            <Route path={pathPattern} element={element} />
+            <Route path="/room/:roomId" element={<GameRoomPage />} />
+            <Route path="/room/:roomId/play/saving-throw" element={<div>Saving Throw Table</div>} />
+            <Route path="/games" element={<div>Games Catalog</div>} />
+          </Routes>
+        </ToastProvider>
       </QueryClientProvider>
     </MemoryRouter>,
   )
@@ -88,29 +99,88 @@ async function seedRoom(gameSlug: string, metadata: Record<string, unknown>) {
   return roomId
 }
 
-describe('Phase 5 Multi-Game UI, Themes & 2-Player Integration', () => {
+describe('Phase 5 & 6 Multi-Game UI, Realtime Room, Yen Wagering & Player-Bound Themes', () => {
   beforeEach(() => {
     window.localStorage.clear()
     localClient.current = createLocalSupabaseClient()
     currentTestUserId = DEMO_HOST_ID
-    useCardThemeStore.getState().setThemeId('classic')
+    useCardThemeStore.getState().setFrontThemeId('classic')
+    useCardThemeStore.getState().setBackThemeId('engei-crimson')
   })
 
-  it('switches custom visual card themes live and persists selection', () => {
-    render(<CardThemeSelector />)
+  it('updates Host room live when Player 2 joins & readies, and auto-launches Player 2 on start', async () => {
+    const client = localClient.current!
+    const { data: room } = await client
+      .from('game_rooms')
+      .insert({
+        game_slug: 'saving-throw',
+        host_id: DEMO_HOST_ID,
+        state: 'waiting',
+        max_players: 2,
+        metadata: { stakeYen: 0, potYen: 0 } as never,
+      })
+      .select('id')
+      .single()
 
-    const neonBtn = screen.getByRole('button', { name: /midnight neon/i })
-    fireEvent.click(neonBtn)
-    expect(useCardThemeStore.getState().themeId).toBe('midnight-neon')
-    expect(neonBtn).toHaveAttribute('aria-pressed', 'true')
+    const roomId = (room as { id: string }).id
 
-    const fantasyBtn = screen.getByRole('button', { name: /royal fantasy/i })
-    fireEvent.click(fantasyBtn)
-    expect(useCardThemeStore.getState().themeId).toBe('royal-fantasy')
+    // Render Host's GameRoomPage
+    currentTestUserId = DEMO_HOST_ID
+    const hostView = renderGameRoute('/room/:roomId', `/room/${roomId}`, <GameRoomPage />)
 
-    const minimalBtn = screen.getByRole('button', { name: /minimalist/i })
-    fireEvent.click(minimalBtn)
-    expect(useCardThemeStore.getState().themeId).toBe('minimalist')
+    await waitFor(() => {
+      expect(screen.getByText(/waiting for players/i)).toBeInTheDocument()
+    })
+
+    // Simulate Player 2 joining and marking ready in another tab (without Host refreshing)
+    await client.from('room_players').insert({
+      room_id: roomId,
+      user_id: DEMO_GUEST_ID,
+      ready: true,
+    })
+    await client
+      .from('room_players')
+      .update({ ready: true })
+      .eq('room_id', roomId)
+      .eq('user_id', DEMO_HOST_ID)
+
+    // Host UI updates automatically via realtime without F5
+    await waitFor(() => {
+      expect(screen.getByText('Sam Chen')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /launch game/i })).toBeInTheDocument()
+    })
+    hostView.unmount()
+
+    // Now render Player 2's GameRoomPage and simulate Host launching the game
+    currentTestUserId = DEMO_GUEST_ID
+    const guestView = renderGameRoute('/room/:roomId', `/room/${roomId}`, <GameRoomPage />)
+    await screen.findByText('Sam Chen')
+
+    await client.from('game_rooms').update({ state: 'playing' }).eq('id', roomId)
+
+    await waitFor(() => {
+      expect(screen.getByText('Saving Throw Table')).toBeInTheDocument()
+    })
+    guestView.unmount()
+  })
+
+  it('switches player-bound Front & Back card themes independently with live Recto/Verso preview', () => {
+    render(<CardThemeSelector mode="inline" />)
+
+    expect(screen.getByLabelText(/aperçu recto/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/aperçu verso/i)).toBeInTheDocument()
+
+    const cyberBtn = screen.getByRole('button', { name: /cyber tokyo/i })
+    fireEvent.click(cyberBtn)
+    expect(useCardThemeStore.getState().frontThemeId).toBe('midnight-neon')
+
+    const bamiBtn = screen.getByRole('button', { name: /bami gold crest/i })
+    fireEvent.click(bamiBtn)
+    expect(useCardThemeStore.getState().backThemeId).toBe('bami-gold')
+
+    const epureBtn = screen.getByRole('button', { name: /épuré/i })
+    fireEvent.click(epureBtn)
+    expect(useCardThemeStore.getState().frontThemeId).toBe('minimalist')
   })
 
   it('renders AnimatedDice and AnimatedCoinFlip with roll/reroll and call/result', () => {
@@ -151,13 +221,13 @@ describe('Phase 5 Multi-Game UI, Themes & 2-Player Integration', () => {
       expect(screen.getByText(/round 1/i)).toBeInTheDocument()
     })
 
-    // Read who became 'first' from persisted DB
     const { data: roomAfterFlip } = await localClient.current!
       .from('game_rooms')
       .select('metadata')
       .eq('id', roomId)
       .single()
-    const meta1 = (roomAfterFlip as unknown as { metadata: ReturnType<typeof createInitialState> }).metadata
+    const meta1 = (roomAfterFlip as unknown as { metadata: ReturnType<typeof createInitialState> })
+      .metadata
     const firstId = meta1.currentTurnUserId!
     const secondId = firstId === DEMO_HOST_ID ? DEMO_GUEST_ID : DEMO_HOST_ID
     view1.unmount()
@@ -170,11 +240,8 @@ describe('Phase 5 Multi-Game UI, Themes & 2-Player Integration', () => {
       <SavingThrowPage />,
     )
 
-    const rollBtn1 = await screen.findByRole('button', { name: /roll 2d10/i })
-    fireEvent.click(rollBtn1)
-
-    const keepBtn1 = await screen.findByRole('button', { name: /keep score/i })
-    fireEvent.click(keepBtn1)
+    fireEvent.click(await screen.findByRole('button', { name: /roll 2d10/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /keep score/i }))
 
     await waitFor(() => {
       expect(screen.getByText(/waiting for opponent/i)).toBeInTheDocument()
@@ -189,11 +256,8 @@ describe('Phase 5 Multi-Game UI, Themes & 2-Player Integration', () => {
       <SavingThrowPage />,
     )
 
-    const rollBtn2 = await screen.findByRole('button', { name: /roll 2d10/i })
-    fireEvent.click(rollBtn2)
-
-    const keepBtn2 = await screen.findByRole('button', { name: /keep score/i })
-    fireEvent.click(keepBtn2)
+    fireEvent.click(await screen.findByRole('button', { name: /roll 2d10/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /keep score/i }))
 
     await waitFor(() => {
       expect(screen.getByText(/won round 1/i)).toBeInTheDocument()
@@ -213,19 +277,22 @@ describe('Phase 5 Multi-Game UI, Themes & 2-Player Integration', () => {
     refreshed.unmount()
   })
 
-  it('plays Blackjack Twist 2-player match with face-card sabotage, theme switch, and shared reveal', async () => {
+  it('plays Blackjack Twist 2-player match with player-bound fronts, sabotage, and shared reveal', async () => {
     const state = dealInitial([DEMO_HOST_ID, DEMO_GUEST_ID], DEMO_HOST_ID)
-    state.playersRecord[DEMO_HOST_ID].hand = [{ id: 'h10', suit: 'hearts', rank: '10' }]
+    state.playersRecord[DEMO_HOST_ID].hand = [
+      { id: 'h10', suit: 'hearts', rank: '10', ownerId: DEMO_HOST_ID },
+    ]
     state.playersRecord[DEMO_HOST_ID].score = 10
-    state.playersRecord[DEMO_GUEST_ID].hand = [{ id: 'd9', suit: 'diamonds', rank: '9' }]
+    state.playersRecord[DEMO_GUEST_ID].hand = [
+      { id: 'd9', suit: 'diamonds', rank: '9', ownerId: DEMO_GUEST_ID },
+    ]
     state.playersRecord[DEMO_GUEST_ID].score = 9
     state.sharedHiddenCard = { id: 'cA', suit: 'clubs', rank: 'A', isHidden: true }
-    // Next card drawn will be Jack of Spades
     state.deck = [{ id: 'sJ', suit: 'spades', rank: 'J' }]
 
     const roomId = await seedRoom('blackjack-twist', state as unknown as Record<string, unknown>)
 
-    // Host draws Jack and gives (-3) to opponent
+    // Host opens Mes Cartes modal, switches front theme, draws Jack, and gives (-3) to Sam
     currentTestUserId = DEMO_HOST_ID
     const v1 = renderGameRoute(
       '/room/:roomId/play/blackjack-twist',
@@ -233,17 +300,23 @@ describe('Phase 5 Multi-Game UI, Themes & 2-Player Integration', () => {
       <BlackjackTwistPage />,
     )
 
-    // Switch card theme live
-    fireEvent.click(await screen.findByRole('button', { name: /midnight neon/i }))
-    expect(useCardThemeStore.getState().themeId).toBe('midnight-neon')
+    fireEvent.click(await screen.findByRole('button', { name: /mes cartes/i }))
+    fireEvent.click(screen.getByRole('button', { name: /cyber tokyo/i }))
+    expect(useCardThemeStore.getState().frontThemeId).toBe('midnight-neon')
+    fireEvent.click(screen.getByRole('button', { name: /fermer/i }))
 
     fireEvent.click(screen.getByRole('button', { name: /hit \(draw card\)/i }))
-    const giveJackBtn = await screen.findByRole('button', { name: /give opponent \(-3\)/i })
-    fireEvent.click(giveJackBtn)
+    fireEvent.click(await screen.findByRole('button', { name: /give opponent \(-3\)/i }))
 
     await waitFor(() => {
       expect(screen.getByText(/waiting for opponent/i)).toBeInTheDocument()
     })
+
+    // Host's sabotaged Jack in Sam's hand carries Alex's front theme ('royal-fantasy' from profile)
+    const jackCardEl = screen.getByLabelText('J of spades')
+    expect(jackCardEl).toHaveAttribute('data-front-theme', 'royal-fantasy')
+    const nineCardEl = screen.getByLabelText('9 of diamonds')
+    expect(nineCardEl).toHaveAttribute('data-front-theme', 'classic')
     v1.unmount()
 
     // Player 2 stands
@@ -253,22 +326,20 @@ describe('Phase 5 Multi-Game UI, Themes & 2-Player Integration', () => {
       `/room/${roomId}/play/blackjack-twist`,
       <BlackjackTwistPage />,
     )
-    const p2StandBtn = await screen.findByRole('button', { name: /^stand$/i })
-    fireEvent.click(p2StandBtn)
+    fireEvent.click(await screen.findByRole('button', { name: /^stand$/i }))
     await waitFor(() => {
       expect(screen.getByText(/you stood — waiting for opponent/i)).toBeInTheDocument()
     })
     v2.unmount()
 
-    // Host stands -> game resolves, shared card revealed (10 + 11 = 21 vs 9 - 3 + 11 = 17)
+    // Host stands -> game resolves, shared card revealed
     currentTestUserId = DEMO_HOST_ID
     const v3 = renderGameRoute(
       '/room/:roomId/play/blackjack-twist',
       `/room/${roomId}/play/blackjack-twist`,
       <BlackjackTwistPage />,
     )
-    const p1StandBtn = await screen.findByRole('button', { name: /^stand$/i })
-    fireEvent.click(p1StandBtn)
+    fireEvent.click(await screen.findByRole('button', { name: /^stand$/i }))
 
     await waitFor(() => {
       expect(screen.getByText(/victory! you won!/i)).toBeInTheDocument()
@@ -277,15 +348,17 @@ describe('Phase 5 Multi-Game UI, Themes & 2-Player Integration', () => {
     v3.unmount()
   })
 
-  it('plays Four Seasons 2-player turn, enforces seasonal rules, and restores state on refresh', async () => {
+  it('plays Four Seasons 2-player turn showing opponent back theme & player front theme on discard', async () => {
     const state = dealInitialHands([DEMO_HOST_ID, DEMO_GUEST_ID], DEMO_HOST_ID)
     state.activeSeason = 'hearts'
-    state.discardPile = [{ id: 'h3', suit: 'hearts', rank: '3' }]
+    state.discardPile = [{ id: 'h3', suit: 'hearts', rank: '3', ownerId: DEMO_GUEST_ID }]
     state.playersRecord[DEMO_HOST_ID].hand = [
-      { id: 'd5', suit: 'diamonds', rank: '5' },
-      { id: 'c9', suit: 'clubs', rank: '9' },
+      { id: 'd5', suit: 'diamonds', rank: '5', ownerId: DEMO_HOST_ID },
+      { id: 'c9', suit: 'clubs', rank: '9', ownerId: DEMO_HOST_ID },
     ]
-    state.playersRecord[DEMO_GUEST_ID].hand = [{ id: 's7', suit: 'spades', rank: '7' }]
+    state.playersRecord[DEMO_GUEST_ID].hand = [
+      { id: 's7', suit: 'spades', rank: '7', ownerId: DEMO_GUEST_ID },
+    ]
 
     const roomId = await seedRoom('four-seasons', state as unknown as Record<string, unknown>)
 
@@ -296,11 +369,13 @@ describe('Phase 5 Multi-Game UI, Themes & 2-Player Integration', () => {
       <FourSeasonsPage />,
     )
 
-    // 5 of diamonds (Summer) is playable after Spring (hearts)
     const playableCard = await screen.findByRole('button', { name: /play 5 of diamonds/i })
-    expect(playableCard).not.toBeDisabled()
+    expect(playableCard).toHaveAttribute('data-front-theme', 'royal-fantasy')
 
-    // 9 of clubs (Winter) is NOT playable on Spring
+    // Opponent's hidden card back uses Sam's card_back_theme ('engei-crimson')
+    const hiddenCards = screen.getAllByLabelText('Hidden card')
+    expect(hiddenCards[0]).toHaveAttribute('data-back-theme', 'engei-crimson')
+
     const illegalCard = screen.getByRole('button', { name: /play 9 of clubs/i })
     expect(illegalCard).toBeDisabled()
 
@@ -311,7 +386,7 @@ describe('Phase 5 Multi-Game UI, Themes & 2-Player Integration', () => {
     })
     v1.unmount()
 
-    // Player 2 refreshes into the room and plays their final card (7 of spades on Summer -> Autumn) to win
+    // Player 2 refreshes into the room and plays their final card to win
     currentTestUserId = DEMO_GUEST_ID
     const v2 = renderGameRoute(
       '/room/:roomId/play/four-seasons',
@@ -319,7 +394,12 @@ describe('Phase 5 Multi-Game UI, Themes & 2-Player Integration', () => {
       <FourSeasonsPage />,
     )
 
-    const winCard = await screen.findByRole('button', { name: /play 7 of spades/i })
+    // Discard pile top card (5 of diamonds played by Host) shows Host's front theme ('royal-fantasy')
+    const topDiscard = await screen.findByLabelText('5 of diamonds')
+    expect(topDiscard).toHaveAttribute('data-front-theme', 'royal-fantasy')
+
+    const winCard = screen.getByRole('button', { name: /play 7 of spades/i })
+    expect(winCard).toHaveAttribute('data-front-theme', 'classic')
     fireEvent.click(winCard)
 
     await waitFor(() => {

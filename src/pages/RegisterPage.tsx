@@ -41,7 +41,7 @@ export function RegisterPage() {
   return (
     <AuthCard
       title="Create your account"
-      subtitle="Join CardArena — it's free"
+      subtitle="Join ENGEI — Académie & Cercle Privé"
       footer={
         <>
           Already have an account?{' '}

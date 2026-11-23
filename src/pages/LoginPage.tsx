@@ -40,7 +40,7 @@ export function LoginPage() {
   return (
     <AuthCard
       title="Welcome back"
-      subtitle="Sign in to your CardArena account"
+      subtitle="Sign in to your ENGEI — Cercle Bami account"
       footer={
         <>
           Don&apos;t have an account?{' '}

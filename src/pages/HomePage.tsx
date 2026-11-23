@@ -6,28 +6,27 @@ import { Card } from '@/components/ui/Card'
 const features = [
   {
     icon: Users,
-    title: 'Play with Friends',
-    description: 'Add friends, see who is online, and invite them into private game rooms.',
+    title: 'Cercles & Rivaux',
+    description: 'Ajoutez vos alliés ou rivaux des clans Bami, suivez leur présence et invitez-les en salon privé.',
   },
   {
     icon: Gamepad2,
-    title: 'Multiple Games',
-    description: 'Starting with Blackjack. More card games coming soon — all under one roof.',
+    title: '4 Jeux d’Engei',
+    description: 'Blackjack, Saving Throw, Blackjack Twist et Four Seasons — avec mises en ¥ ou parties amicales.',
   },
   {
     icon: Spade,
-    title: 'Real-time Action',
-    description: "Cards dealt, turns taken, results revealed — all live via Supabase Realtime.",
+    title: 'Cartes & Prestige',
+    description: 'Personnalisez votre recto et verso, misez à la Banque des 6 Lances et jouez en temps réel.',
   },
 ]
 
 /**
- * Landing / home page.
- * Phase 2 will replace the hero with personalized content for logged-in users.
+ * Landing / home page — ENGEI (宴芸).
  */
 export function HomePage() {
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in bg-engei-pattern">
       {/* ── Hero ── */}
       <section className="relative overflow-hidden py-24 px-4 text-center">
         {/* Background glow */}
@@ -35,24 +34,24 @@ export function HomePage() {
           className="pointer-events-none absolute inset-0 -z-10"
           aria-hidden="true"
         >
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 size-[600px] rounded-full bg-brand-500/8 blur-3xl" />
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 size-[600px] rounded-full bg-brand-500/12 blur-3xl" />
         </div>
 
         <div className="max-w-2xl mx-auto space-y-6">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-brand-500/30 bg-brand-500/10 text-brand-400 text-sm font-medium mb-2">
-            <Spade className="size-3.5 fill-brand-400" aria-hidden="true" />
-            Multiplayer Card Games
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-gold-500/40 bg-gold-500/10 text-gold-300 text-sm font-medium mb-2">
+            <Spade className="size-3.5 fill-brand-500 text-brand-500" aria-hidden="true" />
+            ENGEI (宴芸) — Cercle Bami
           </div>
 
           <h1 className="text-4xl sm:text-5xl font-extrabold text-slate-100 tracking-tight leading-tight">
-            Deal. Bluff. Win.
+            Misez. Bluffez. Dominez.
             <br />
-            <span className="text-brand-400">Play with Friends.</span>
+            <span className="text-gold-400">Sous les lumières d’Engei.</span>
           </h1>
 
           <p className="text-lg text-slate-400 leading-relaxed">
-            CardArena is your online card game room. Invite friends, start a Blackjack table, and
-            experience real-time multiplayer — right in your browser.
+            Bienvenue dans le district souterrain fondé par la famille Jabami et régi par les clans
+            Bami. Ouvrez une table privée, engagez vos ¥ à la Banque des 6 Lances et défiez vos adversaires.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">

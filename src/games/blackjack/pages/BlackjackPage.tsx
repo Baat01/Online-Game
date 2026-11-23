@@ -35,7 +35,17 @@ export function BlackjackPage() {
 
   useBlackjackRealtime(roomId ?? '', game?.id)
 
-  const [profileMap, setProfileMap] = useState<Record<string, { username: string; avatarUrl: string | null }>>({})
+  const [profileMap, setProfileMap] = useState<
+    Record<
+      string,
+      {
+        username: string
+        avatarUrl: string | null
+        cardFrontTheme?: string
+        cardBackTheme?: string
+      }
+    >
+  >({})
   const [initializing, setInitializing] = useState(false)
 
   const isHost = user?.id === room?.hostId
@@ -47,11 +57,27 @@ export function BlackjackPage() {
       const ids = room.players.map(p => p.userId)
       if (!ids.length) return
       
-      const { data } = await supabase.from('profiles').select('id, username, avatar_url').in('id', ids)
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, username, avatar_url, card_front_theme, card_back_theme')
+        .in('id', ids)
       if (data) {
-        const map: Record<string, { username: string; avatarUrl: string | null }> = {}
-        data.forEach(p => {
-          map[p.id] = { username: p.username, avatarUrl: p.avatar_url }
+        const map: Record<
+          string,
+          {
+            username: string
+            avatarUrl: string | null
+            cardFrontTheme?: string
+            cardBackTheme?: string
+          }
+        > = {}
+        data.forEach((p) => {
+          map[p.id] = {
+            username: p.username,
+            avatarUrl: p.avatar_url,
+            cardFrontTheme: p.card_front_theme,
+            cardBackTheme: p.card_back_theme,
+          }
         })
         setProfileMap(map)
       }

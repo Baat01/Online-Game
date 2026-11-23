@@ -565,35 +565,50 @@ export type Database = {
         Row: {
           avatar_url: string | null
           bio: string | null
+          card_back_theme: string
+          card_front_theme: string
+          clan_title: string | null
           created_at: string
           display_name: string | null
           id: string
+          is_admin: boolean
           is_online: boolean
           last_seen: string
           updated_at: string
           username: string
+          yen_balance: number
         }
         Insert: {
           avatar_url?: string | null
           bio?: string | null
+          card_back_theme?: string
+          card_front_theme?: string
+          clan_title?: string | null
           created_at?: string
           display_name?: string | null
           id: string
+          is_admin?: boolean
           is_online?: boolean
           last_seen?: string
           updated_at?: string
           username: string
+          yen_balance?: number
         }
         Update: {
           avatar_url?: string | null
           bio?: string | null
+          card_back_theme?: string
+          card_front_theme?: string
+          clan_title?: string | null
           created_at?: string
           display_name?: string | null
           id?: string
+          is_admin?: boolean
           is_online?: boolean
           last_seen?: string
           updated_at?: string
           username?: string
+          yen_balance?: number
         }
         Relationships: []
       }

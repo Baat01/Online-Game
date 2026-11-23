@@ -80,6 +80,7 @@ export function useRoom(roomId: string) {
       },
       onPlayersChange: () => {
         void queryClient.invalidateQueries({ queryKey: key })
+        void queryClient.invalidateQueries({ queryKey: lobbyKeys.outgoingInvites(roomId) })
       },
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps

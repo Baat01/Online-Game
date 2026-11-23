@@ -6,7 +6,15 @@ interface Props {
   game: BlackjackGame
   players: BlackjackPlayer[]
   myUserId: string | undefined
-  profileMap: Record<string, { username: string; avatarUrl: string | null }>
+  profileMap: Record<
+    string,
+    {
+      username: string
+      avatarUrl: string | null
+      cardFrontTheme?: string
+      cardBackTheme?: string
+    }
+  >
 }
 
 export function BlackjackTable({ game, players, myUserId, profileMap }: Props) {
