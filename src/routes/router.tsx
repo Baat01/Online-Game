@@ -9,6 +9,7 @@ import { ProfilePage } from '@/pages/ProfilePage'
 import { FriendsPage } from '@/pages/FriendsPage'
 import { GamesPage } from '@/pages/GamesPage'
 import { GameRoomPage } from '@/pages/GameRoomPage'
+import { QuickDrawPage } from '@/pages/QuickDrawPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { BlackjackPage } from '@/games/blackjack/pages/BlackjackPage'
 import { SavingThrowPage } from '@/games/saving-throw/pages/SavingThrowPage'
@@ -67,6 +68,10 @@ const routes: RouteObject[] = [
           {
             path: 'games',
             element: <GamesPage />,
+          },
+          {
+            path: 'quick-draw',
+            element: <QuickDrawPage />,
           },
           {
             path: 'room/:roomId',

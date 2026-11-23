@@ -6,6 +6,7 @@ import { createLocalSupabaseClient, DEMO_HOST_ID, DEMO_GUEST_ID } from '@/lib/lo
 
 // ── Mutable active user for simulating 2-player turns ──
 let currentTestUserId = DEMO_HOST_ID
+let enableOptionalAuthMock = false
 
 const { localClient } = vi.hoisted(() => ({
   localClient: { current: null as ReturnType<typeof createLocalSupabaseClient> | null },
@@ -23,37 +24,49 @@ vi.mock('@/lib/supabase', () => {
   }
 })
 
+const getMockAuthValue = () => ({
+  user: {
+    id: currentTestUserId,
+    email: currentTestUserId === DEMO_HOST_ID ? 'alex@engei.local' : 'sam@engei.local',
+  },
+  profile: {
+    id: currentTestUserId,
+    username: currentTestUserId === DEMO_HOST_ID ? 'alex_host' : 'sam_challenger',
+    display_name: currentTestUserId === DEMO_HOST_ID ? 'Alex Rivera' : 'Sam Chen',
+    avatar_url: null,
+    yen_balance: currentTestUserId === DEMO_HOST_ID ? 500000 : 10000,
+    is_admin: currentTestUserId === DEMO_HOST_ID,
+    clan_title: currentTestUserId === DEMO_HOST_ID ? 'Clan Momobami' : 'Clan Jabami',
+    card_back_theme: currentTestUserId === DEMO_HOST_ID ? 'bami-gold' : 'engei-crimson',
+    card_front_theme: currentTestUserId === DEMO_HOST_ID ? 'royal-fantasy' : 'classic',
+    unlocked_themes:
+      currentTestUserId === DEMO_HOST_ID
+        ? ['classic', 'royal-fantasy', 'minimalist', 'midnight-neon', 'undertale-tarot', 'kinto-pay-to-win']
+        : ['classic', 'royal-fantasy', 'minimalist'],
+  },
+  loading: false,
+  refreshProfile: vi.fn().mockResolvedValue(undefined),
+})
+
 vi.mock('@/hooks/useAuth', () => ({
-  useAuth: () => ({
-    user: {
-      id: currentTestUserId,
-      email: currentTestUserId === DEMO_HOST_ID ? 'alex@engei.local' : 'sam@engei.local',
-    },
-    profile: {
-      id: currentTestUserId,
-      username: currentTestUserId === DEMO_HOST_ID ? 'alex_host' : 'sam_challenger',
-      display_name: currentTestUserId === DEMO_HOST_ID ? 'Alex Rivera' : 'Sam Chen',
-      avatar_url: null,
-      yen_balance: currentTestUserId === DEMO_HOST_ID ? 500000 : 10000,
-      is_admin: currentTestUserId === DEMO_HOST_ID,
-      clan_title: currentTestUserId === DEMO_HOST_ID ? 'Clan Momobami' : 'Clan Jabami',
-      card_back_theme: currentTestUserId === DEMO_HOST_ID ? 'bami-gold' : 'engei-crimson',
-      card_front_theme: currentTestUserId === DEMO_HOST_ID ? 'royal-fantasy' : 'classic',
-    },
-    loading: false,
-    refreshProfile: vi.fn().mockResolvedValue(undefined),
-  }),
+  useAuth: () => getMockAuthValue(),
+}))
+
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuthContext: () => getMockAuthValue(),
+  useOptionalAuthContext: () => (enableOptionalAuthMock ? getMockAuthValue() : null),
 }))
 
 import { ToastProvider } from '@/components/ui/Toast'
 import { GlobalInvitationPopup } from '@/components/lobby/GlobalInvitationPopup'
 import { useThemeStore } from '@/stores/themeStore'
 import { GameRoomPage } from '@/pages/GameRoomPage'
+import { QuickDrawPage } from '@/pages/QuickDrawPage'
 import { SavingThrowPage } from '../saving-throw/pages/SavingThrowPage'
 import { BlackjackTwistPage } from '../blackjack-twist/pages/BlackjackTwistPage'
 import { FourSeasonsPage } from '../four-seasons/pages/FourSeasonsPage'
-import { CardThemeSelector, AnimatedDice, AnimatedCoinFlip, ThemedCard } from '../_shared/components'
-import { useCardThemeStore } from '../_shared/themes'
+import { CardThemeSelector, AnimatedDice, AnimatedCoinFlip, ThemedCard, TarotArcanaCard } from '../_shared/components'
+import { UNDERTALE_TAROT_ARCANA, useCardThemeStore } from '../_shared/themes'
 import { createInitialState } from '../saving-throw/engine/savingThrowEngine'
 import { dealInitial } from '../blackjack-twist/engine/twistEngine'
 import { dealInitialHands } from '../four-seasons/engine/fourSeasonsEngine'
@@ -108,6 +121,7 @@ describe('Phase 5 & 6 Multi-Game UI, Realtime Room, Yen Wagering & Player-Bound 
     window.sessionStorage.clear()
     localClient.current = createLocalSupabaseClient()
     currentTestUserId = DEMO_HOST_ID
+    enableOptionalAuthMock = false
     useCardThemeStore.getState().setFrontThemeId('classic')
     useCardThemeStore.getState().setBackThemeId('engei-crimson')
   })
@@ -310,7 +324,11 @@ describe('Phase 5 & 6 Multi-Game UI, Realtime Room, Yen Wagering & Player-Bound 
     fireEvent.click(screen.getByRole('button', { name: /fermer/i }))
 
     fireEvent.click(screen.getByRole('button', { name: /hit \(draw card\)/i }))
-    fireEvent.click(await screen.findByRole('button', { name: /give opponent \(-3\)/i }))
+    const giveBtn = await screen.findByRole('button', { name: /give opponent \(-3\)/i })
+    await waitFor(() => {
+      expect(giveBtn).not.toBeDisabled()
+    })
+    fireEvent.click(giveBtn)
 
     await waitFor(() => {
       expect(screen.getByText(/waiting for opponent/i)).toBeInTheDocument()
@@ -456,7 +474,7 @@ describe('Phase 5 & 6 Multi-Game UI, Realtime Room, Yen Wagering & Player-Bound 
     view.unmount()
   })
 
-  it('toggles Day/Night theme classes and renders Undertale Tarot, Dice, and Coin themes', () => {
+  it('toggles Day/Night theme classes and renders illustrated Court Cards, Tarot, Kinto Dice & Coin', () => {
     useThemeStore.getState().setTheme('light')
     expect(document.documentElement.classList.contains('light')).toBe(true)
     expect(document.documentElement.getAttribute('data-theme')).toBe('light')
@@ -467,24 +485,85 @@ describe('Phase 5 & 6 Multi-Game UI, Realtime Room, Yen Wagering & Player-Bound 
 
     render(
       <div>
-        <ThemedCard suit="hearts" rank="A" frontThemeId="undertale-tarot" />
+        <ThemedCard suit="hearts" rank="J" frontThemeId="classic" />
+        <ThemedCard suit="spades" rank="Q" frontThemeId="royal-fantasy" />
+        <ThemedCard suit="diamonds" rank="K" frontThemeId="kinto-pay-to-win" />
+        <TarotArcanaCard arcanum={UNDERTALE_TAROT_ARCANA[20]} />
         <AnimatedDice
           tens={4}
           units={2}
           combinedScore={42}
-          diceThemeId="astral-crystal"
+          diceThemeId="kinto-gacha-dice"
           rollKey="k1"
         />
-        <AnimatedCoinFlip choice="heads" result="heads" coinThemeId="railgun-coin" />
+        <AnimatedCoinFlip choice="heads" result="heads" coinThemeId="kinto-railgun-coin" />
       </div>,
     )
 
-    const tarotCard = screen.getByLabelText('A of hearts')
-    expect(tarotCard).toHaveAttribute('data-front-theme', 'undertale-tarot')
-    expect(tarotCard).toHaveAttribute('data-tarot-arcana', 'Human')
-    expect(screen.getByText('Human')).toBeInTheDocument()
+    expect(document.querySelector('[data-court-illustration="J"]')).toBeInTheDocument()
+    expect(document.querySelector('[data-court-illustration="Q"]')).toBeInTheDocument()
+    expect(document.querySelector('[data-court-illustration="K"]')).toBeInTheDocument()
 
-    expect(document.querySelector('[data-dice-theme="astral-crystal"]')).toBeInTheDocument()
-    expect(document.querySelector('[data-coin-theme="railgun-coin"]')).toBeInTheDocument()
+    const tarotCard = screen.getByLabelText(/XX — Sans/i)
+    expect(tarotCard).toHaveAttribute('data-tarot-arcana', 'Sans')
+    expect(screen.getByText('Sans')).toBeInTheDocument()
+
+    expect(document.querySelector('[data-dice-theme="kinto-gacha-dice"]')).toBeInTheDocument()
+    expect(document.querySelector('[data-coin-theme="kinto-railgun-coin"]')).toBeInTheDocument()
+  })
+
+  it('supports Interactive 3D Theme Inspector, Shop Purchase, and Quick Draw Sandbox tabs', async () => {
+    enableOptionalAuthMock = true
+    // Non-admin Sam opens CardThemeSelector, inspects locked Kinto Pay-To-Win front & buys it
+    await localClient.current!.auth.signInWithPassword({ email: 'sam@engei.local', password: 'password123' })
+    currentTestUserId = DEMO_GUEST_ID
+
+    const vShop = render(
+      <MemoryRouter>
+        <CardThemeSelector mode="inline" />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByTestId('inspector-3d-stage')).toBeInTheDocument()
+    // undertale-tarot is NOT in the 52-card face list
+    const frontGroup = screen.getByRole('group', { name: /face des cartes/i })
+    expect(frontGroup.textContent).not.toMatch(/undertale/i)
+
+    fireEvent.click(screen.getByRole('button', { name: /pay-to-win minimaliste/i }))
+    const buyBtn = await screen.findByRole('button', { name: /acheter/i })
+    fireEvent.click(buyBtn)
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent(/débloqué/i)
+    })
+    vShop.unmount()
+
+    // Now test QuickDrawPage as Host (Admin with Undertale Tarot unlocked)
+    await localClient.current!.auth.signInWithPassword({ email: 'alex@engei.local', password: 'password123' })
+    currentTestUserId = DEMO_HOST_ID
+    const vQuick = renderGameRoute('/quick-draw', '/quick-draw', <QuickDrawPage />)
+
+    // Tab 1: Standard 54 cards
+    fireEvent.click(screen.getByRole('button', { name: /tirer une carte/i }))
+    expect(screen.getByText(/53 cartes restantes/i)).toBeInTheDocument()
+
+    // Tab 2: Undertale Tarot
+    fireEvent.click(screen.getByRole('tab', { name: /tarot undertale/i }))
+    fireEvent.click(screen.getByRole('button', { name: /tirage 3 cartes/i }))
+    expect(screen.getByText(/^passé(\s·\srenversé)?$/i)).toBeInTheDocument()
+    expect(screen.getByText(/^présent(\s·\srenversé)?$/i)).toBeInTheDocument()
+    expect(screen.getByText(/^futur(\s·\srenversé)?$/i)).toBeInTheDocument()
+
+    // Tab 3: Dice
+    fireEvent.click(screen.getByRole('tab', { name: /lancer de dé/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^d20$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /lancer d20/i }))
+    expect(screen.getAllByText(/D20/).length).toBeGreaterThan(0)
+
+    // Tab 4: Coin
+    fireEvent.click(screen.getByRole('tab', { name: /lancer de pièce/i }))
+    fireEvent.click(screen.getByRole('button', { name: /lancer la pièce 3d/i }))
+    expect(screen.getByLabelText(/coin landed on/i)).toBeInTheDocument()
+    vQuick.unmount()
   })
 })

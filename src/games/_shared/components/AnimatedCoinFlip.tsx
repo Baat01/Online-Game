@@ -38,6 +38,7 @@ export function AnimatedCoinFlip({
   const faceGradient =
     displayFace === 'heads' ? coinTheme.headsGradientClass : coinTheme.tailsGradientClass
   const faceSymbol = displayFace === 'heads' ? coinTheme.headsSymbol : coinTheme.tailsSymbol
+  const isRailgun = coinTheme.id === 'kinto-railgun-coin' || coinTheme.id === 'railgun-coin'
 
   return (
     <div className="flex flex-col items-center gap-3" data-coin-theme={coinTheme.id}>
@@ -49,6 +50,12 @@ export function AnimatedCoinFlip({
               'absolute inset-0 rounded-full border-2 pointer-events-none animate-impact-ring motion-reduce:hidden',
               coinTheme.rimColorClass,
             )}
+          />
+        )}
+        {isRailgun && isSpinning && (
+          <span
+            aria-hidden="true"
+            className="absolute -inset-2 rounded-full border border-dashed border-amber-400/75 pointer-events-none animate-spin motion-reduce:hidden"
           />
         )}
 

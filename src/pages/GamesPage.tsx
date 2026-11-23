@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Gamepad2, Coins } from 'lucide-react'
+import { NavLink } from 'react-router-dom'
+import { Gamepad2, Coins, Dices } from 'lucide-react'
 import { GAME_REGISTRY } from '@/games/registry'
 import { useToast } from '@/components/ui/Toast'
 import { useLobby } from '@/hooks/useLobby'
@@ -99,6 +100,13 @@ export function GamesPage() {
               )}
             </span>
           </div>
+          <NavLink
+            to="/quick-draw"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-btn bg-surface-800 border border-surface-600 hover:border-gold-400/70 text-slate-200 text-xs font-semibold no-underline transition-colors"
+          >
+            <Dices className="size-3.5 text-gold-400" aria-hidden="true" />
+            Tirage Libre
+          </NavLink>
           <CardThemeSelector mode="modal" />
         </div>
       </div>

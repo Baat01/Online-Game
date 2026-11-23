@@ -1,7 +1,9 @@
+import { useEffect } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { clsx } from 'clsx'
-import { Spade, Home, Users, Gamepad2, Moon, Sun, LogIn, UserPlus, LogOut, Coins, Shield } from 'lucide-react'
+import { Spade, Home, Users, Gamepad2, Dices, Moon, Sun, LogIn, UserPlus, LogOut, Coins, Shield } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
+import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/hooks/useTheme'
 import { useAuth } from '@/hooks/useAuth'
 import { useToast } from '@/components/ui/Toast'
@@ -19,6 +21,7 @@ const navLinks = [
   { to: '/', label: 'Home', icon: Home, end: true },
   { to: '/friends', label: 'Friends', icon: Users, end: false },
   { to: '/games', label: 'Games', icon: Gamepad2, end: false },
+  { to: '/quick-draw', label: 'Tirage Libre', icon: Dices, end: false },
 ]
 
 /**
@@ -27,13 +30,44 @@ const navLinks = [
  */
 export function RootLayout() {
   const { isDark, toggleTheme } = useTheme()
-  const { user, profile, loading, logout } = useAuth()
+  const { user, profile, loading, logout, refreshProfile } = useAuth()
   const { toast } = useToast()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
   // Manage self-presence: go online when logged in, offline on logout/unmount
   useSelfPresence()
+
+  // Real-time Yen transfer notification for recipient
+  useEffect(() => {
+    if (!user?.id) return
+    const ch = supabase
+      .channel(`yen-tx-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'yen_transactions' },
+        (payload) => {
+          const row = payload.new as {
+            recipient_id?: string | null
+            amount?: number
+            note?: string | null
+            transaction_type?: string
+          }
+          if (row?.recipient_id === user.id && typeof row.amount === 'number' && row.amount > 0) {
+            void refreshProfile()
+            toast(
+              `+${formatYen(row.amount)} reçus par virement ENGEI${row.note ? ` (« ${row.note} »)` : ''} !`,
+              'success',
+            )
+          }
+        },
+      )
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(ch)
+    }
+  }, [user?.id, refreshProfile, toast])
 
   // Read incoming request count from cache (populated when FriendsPage is visited)
   const incomingCount = user

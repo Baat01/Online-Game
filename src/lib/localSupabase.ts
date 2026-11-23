@@ -67,10 +67,10 @@ function createInitialDb(): LocalDbState {
           dice_theme: 'obsidian-gold',
           coin_theme: 'momobami-seal',
           unlocked_themes: [
-            'classic', 'royal-fantasy', 'minimalist', 'midnight-neon', 'undertale-tarot',
-            'engei-crimson', 'bami-gold', 'obsidian-minimalist',
-            'obsidian-gold', 'crimson-engei', 'ivory-academy', 'cyber-tokyo', 'astral-crystal',
-            'classic-yen', 'momobami-seal', 'engei-scarlet', 'railgun-coin', 'eclipse-medal',
+            'classic', 'royal-fantasy', 'minimalist', 'midnight-neon', 'undertale-tarot', 'kinto-pay-to-win',
+            'engei-crimson', 'bami-gold', 'obsidian-minimalist', 'kinto-sovereign-back',
+            'obsidian-gold', 'crimson-engei', 'ivory-academy', 'cyber-tokyo', 'astral-crystal', 'kinto-gacha-dice',
+            'classic-yen', 'momobami-seal', 'engei-scarlet', 'railgun-coin', 'eclipse-medal', 'kinto-railgun-coin',
           ],
         },
         {
@@ -159,6 +159,7 @@ function createInitialDb(): LocalDbState {
       blackjack_games: [],
       blackjack_players: [],
       blackjack_actions: [],
+      yen_transactions: [],
     },
   }
 }
@@ -180,17 +181,17 @@ function hydrateProfileDefaults(profile: Row): Row {
     unlocked_themes:
       profile.id === DEMO_HOST_ID
         ? [
-            'classic', 'royal-fantasy', 'minimalist', 'midnight-neon', 'undertale-tarot',
-            'engei-crimson', 'bami-gold', 'obsidian-minimalist',
-            'obsidian-gold', 'crimson-engei', 'ivory-academy', 'cyber-tokyo', 'astral-crystal',
-            'classic-yen', 'momobami-seal', 'engei-scarlet', 'railgun-coin', 'eclipse-medal',
+            'classic', 'royal-fantasy', 'minimalist', 'midnight-neon', 'undertale-tarot', 'kinto-pay-to-win',
+            'engei-crimson', 'bami-gold', 'obsidian-minimalist', 'kinto-sovereign-back',
+            'obsidian-gold', 'crimson-engei', 'ivory-academy', 'cyber-tokyo', 'astral-crystal', 'kinto-gacha-dice',
+            'classic-yen', 'momobami-seal', 'engei-scarlet', 'railgun-coin', 'eclipse-medal', 'kinto-railgun-coin',
           ]
         : [
-            'classic', 'royal-fantasy', 'minimalist',
-            'engei-crimson', 'bami-gold', 'obsidian-minimalist',
-            'obsidian-gold', 'crimson-engei', 'ivory-academy',
-            'classic-yen', 'momobami-seal',
-          ],
+          'classic', 'royal-fantasy', 'minimalist',
+          'engei-crimson', 'bami-gold', 'obsidian-minimalist',
+          'obsidian-gold', 'crimson-engei', 'ivory-academy',
+          'classic-yen', 'momobami-seal',
+        ],
     ...profile,
     bio: cleanBio,
   }
@@ -209,6 +210,7 @@ function loadDb(): LocalDbState {
     }
     const parsed = JSON.parse(raw) as LocalDbState
     if (!parsed.tables) return createInitialDb()
+    parsed.tables.yen_transactions ??= []
     if (Array.isArray(parsed.tables.profiles)) {
       parsed.tables.profiles = parsed.tables.profiles.map(hydrateProfileDefaults)
     }

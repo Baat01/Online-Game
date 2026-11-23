@@ -24,6 +24,9 @@ import {
   adminSetThemeUnlock,
   adminUnlockAllThemes,
   updatePlayerCardThemes,
+  transferYen,
+  getRecentYenTransactions,
+  purchaseTheme,
   getRoomStake,
   getRoomPot,
 } from '../walletService'
@@ -183,5 +186,40 @@ describe('walletService (Trésorerie ENGEI)', () => {
     expect(all).toContain('undertale-tarot')
     expect(all).toContain('astral-crystal')
     expect(all).toContain('railgun-coin')
+    expect(all).toContain('kinto-pay-to-win')
+  })
+
+  it('supports P2P Yen transfers and records yen_transactions history', async () => {
+    // Reject invalid / self transfers
+    await expect(transferYen(DEMO_GUEST_ID, DEMO_GUEST_ID, 100)).rejects.toThrow(/vous-même/i)
+    await expect(transferYen(DEMO_GUEST_ID, DEMO_HOST_ID, 999999)).rejects.toThrow(/insuffisant/i)
+
+    // Non-admin Sam transfers 1 500 ¥ to Alex
+    const res = await transferYen(DEMO_GUEST_ID, DEMO_HOST_ID, 1500, 'Dette Engei')
+    expect(res.senderBalance).toBe(8500)
+    expect(res.recipientBalance).toBe(501500)
+    expect(res.transaction.amount).toBe(1500)
+    expect(res.transaction.note).toBe('Dette Engei')
+
+    // Admin Alex transfers 2 500 ¥ back without losing unlimited balance
+    const adminRes = await transferYen(DEMO_HOST_ID, DEMO_GUEST_ID, 2500, 'Prime Bami')
+    expect(adminRes.senderBalance).toBe(501500)
+    expect(adminRes.recipientBalance).toBe(11000)
+
+    const history = await getRecentYenTransactions(DEMO_GUEST_ID)
+    expect(history.length).toBeGreaterThanOrEqual(2)
+    expect(history[0].amount).toBe(2500)
+  })
+
+  it('allows players to purchase unlockable themes with Yen in Shop', async () => {
+    const res = await purchaseTheme(DEMO_GUEST_ID, 'kinto-gacha-dice')
+    expect(res.priceYen).toBe(600)
+    expect(res.newBalance).toBe(9400)
+    expect(res.unlockedThemes).toContain('kinto-gacha-dice')
+
+    // Purchasing again does not double-charge
+    const dup = await purchaseTheme(DEMO_GUEST_ID, 'kinto-gacha-dice')
+    expect(dup.priceYen).toBe(0)
+    expect(dup.newBalance).toBe(9400)
   })
 })

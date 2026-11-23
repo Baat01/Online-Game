@@ -1,5 +1,9 @@
 import { supabase } from '@/lib/supabase'
-import { DEFAULT_UNLOCKED_THEMES, SPECIAL_UNLOCKABLE_THEMES } from '@/games/_shared/themes'
+import {
+  DEFAULT_UNLOCKED_THEMES,
+  SPECIAL_UNLOCKABLE_THEMES,
+  getThemePriceYen,
+} from '@/games/_shared/themes'
 import type { Json } from '@/types/database'
 import type { GameRoom } from '@/types/lobby'
 import type { Profile } from '@/types/auth'
@@ -328,4 +332,173 @@ export async function adminUnlockAllThemes(targetUserId: string): Promise<string
 
   if (error) throw error
   return all
+}
+
+export interface YenTransaction {
+  id: string
+  sender_id: string | null
+  recipient_id: string | null
+  amount: number
+  transaction_type: 'transfer' | 'shop_purchase' | 'admin_grant' | string
+  note: string | null
+  created_at: string
+}
+
+export async function transferYen(
+  senderId: string,
+  recipientId: string,
+  amount: number,
+  note?: string,
+): Promise<{
+  senderBalance: number
+  recipientBalance: number
+  transaction: YenTransaction
+}> {
+  const cleanAmount = Math.floor(amount)
+  if (!Number.isFinite(cleanAmount) || cleanAmount <= 0) {
+    throw new Error('Le montant du virement doit être supérieur à 0 ¥.')
+  }
+  if (!senderId || !recipientId || senderId === recipientId) {
+    throw new Error('Impossible d’effectuer un virement vers vous-même.')
+  }
+
+  const { data: senderRow, error: senderErr } = await supabase
+    .from('profiles')
+    .select('id, yen_balance, is_admin')
+    .eq('id', senderId)
+    .single()
+
+  if (senderErr || !senderRow) throw senderErr ?? new Error('Expéditeur introuvable.')
+
+  const { data: recipientRow, error: recipErr } = await supabase
+    .from('profiles')
+    .select('id, yen_balance')
+    .eq('id', recipientId)
+    .single()
+
+  if (recipErr || !recipientRow) throw recipErr ?? new Error('Destinataire introuvable.')
+
+  const senderIsAdmin = Boolean((senderRow as { is_admin?: boolean }).is_admin)
+  const currentSenderBal = (senderRow as { yen_balance?: number }).yen_balance ?? DEFAULT_YEN_BALANCE
+  const currentRecipientBal =
+    (recipientRow as { yen_balance?: number }).yen_balance ?? DEFAULT_YEN_BALANCE
+
+  if (!senderIsAdmin && currentSenderBal < cleanAmount) {
+    throw new Error('Solde en ¥ insuffisant pour effectuer ce virement.')
+  }
+
+  const nextSenderBal = senderIsAdmin ? currentSenderBal : currentSenderBal - cleanAmount
+  const nextRecipientBal = currentRecipientBal + cleanAmount
+  const now = new Date().toISOString()
+
+  if (!senderIsAdmin) {
+    const { error: deductErr } = await supabase
+      .from('profiles')
+      .update({ yen_balance: nextSenderBal, updated_at: now })
+      .eq('id', senderId)
+    if (deductErr) throw deductErr
+  }
+
+  const { error: creditErr } = await supabase
+    .from('profiles')
+    .update({ yen_balance: nextRecipientBal, updated_at: now })
+    .eq('id', recipientId)
+
+  if (creditErr) throw creditErr
+
+  const cleanNote = note?.trim() ? note.trim().slice(0, 140) : null
+  const { data: txRow, error: txErr } = await supabase
+    .from('yen_transactions')
+    .insert({
+      sender_id: senderId,
+      recipient_id: recipientId,
+      amount: cleanAmount,
+      transaction_type: 'transfer',
+      note: cleanNote,
+    })
+    .select('id, sender_id, recipient_id, amount, transaction_type, note, created_at')
+    .single()
+
+  if (txErr || !txRow) throw txErr ?? new Error('Erreur lors de l’enregistrement du virement.')
+
+  return {
+    senderBalance: nextSenderBal,
+    recipientBalance: nextRecipientBal,
+    transaction: txRow as YenTransaction,
+  }
+}
+
+export async function getRecentYenTransactions(
+  userId: string,
+  limit = 15,
+): Promise<YenTransaction[]> {
+  if (!userId) return []
+  const { data, error } = await supabase
+    .from('yen_transactions')
+    .select('id, sender_id, recipient_id, amount, transaction_type, note, created_at')
+    .order('created_at', { ascending: false })
+    .limit(50)
+
+  if (error) throw error
+  return ((data ?? []) as YenTransaction[])
+    .filter((tx) => tx.sender_id === userId || tx.recipient_id === userId)
+    .slice(0, limit)
+}
+
+export async function purchaseTheme(
+  userId: string,
+  themeId: string,
+): Promise<{
+  unlockedThemes: string[]
+  newBalance: number
+  priceYen: number
+}> {
+  const priceYen = getThemePriceYen(themeId)
+  const { data: prof, error: fetchErr } = await supabase
+    .from('profiles')
+    .select('id, yen_balance, is_admin, unlocked_themes')
+    .eq('id', userId)
+    .single()
+
+  if (fetchErr || !prof) throw fetchErr ?? new Error('Profil introuvable.')
+
+  const isAdmin = Boolean((prof as { is_admin?: boolean }).is_admin)
+  const currentBal = (prof as { yen_balance?: number }).yen_balance ?? DEFAULT_YEN_BALANCE
+  const existing = Array.isArray((prof as { unlocked_themes?: unknown }).unlocked_themes)
+    ? ((prof as { unlocked_themes: string[] }).unlocked_themes)
+    : [...DEFAULT_UNLOCKED_THEMES]
+
+  if (existing.includes(themeId)) {
+    return { unlockedThemes: existing, newBalance: currentBal, priceYen: 0 }
+  }
+
+  if (!isAdmin && currentBal < priceYen) {
+    throw new Error(`Solde insuffisant (${formatYen(priceYen)} requis).`)
+  }
+
+  const nextBalance = isAdmin ? currentBal : currentBal - priceYen
+  const nextUnlocked = Array.from(new Set([...existing, themeId]))
+
+  const { error: updErr } = await supabase
+    .from('profiles')
+    .update({
+      yen_balance: nextBalance,
+      unlocked_themes: nextUnlocked,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', userId)
+
+  if (updErr) throw updErr
+
+  if (priceYen > 0) {
+    await supabase.from('yen_transactions').insert({
+      sender_id: userId,
+      recipient_id: null,
+      amount: priceYen,
+      transaction_type: 'shop_purchase',
+      note: `Achat Boutique ENGEI : ${themeId}`,
+    })
+  }
+
+  return { unlockedThemes: nextUnlocked, newBalance: nextBalance, priceYen }
 }

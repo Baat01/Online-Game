@@ -13,6 +13,8 @@ interface AnimatedDiceProps {
   highlightWinner?: boolean
   diceThemeId?: string
   size?: 'sm' | 'md'
+  singleDieLabel?: string
+  singleDieValue?: number | null
 }
 
 function D10Face({
@@ -107,6 +109,8 @@ export function AnimatedDice({
   highlightWinner = false,
   diceThemeId,
   size = 'md',
+  singleDieLabel,
+  singleDieValue,
 }: AnimatedDiceProps) {
   const auth = useOptionalAuthContext()
   const { diceThemeId: storeDiceId } = useCardTheme()
@@ -115,18 +119,36 @@ export function AnimatedDice({
   const [isRolling, setIsRolling] = useState(false)
 
   useEffect(() => {
-    if (tens === null && units === null && !rollKey) {
-      setIsRolling(false)
-      return
-    }
-    if (tens === null && units === null) {
+    const hasVal =
+      singleDieLabel !== undefined
+        ? singleDieValue !== null && singleDieValue !== undefined
+        : tens !== null || units !== null
+    if (!hasVal) {
       setIsRolling(false)
       return
     }
     setIsRolling(true)
     const timer = window.setTimeout(() => setIsRolling(false), 850)
     return () => window.clearTimeout(timer)
-  }, [tens, units, rollKey])
+  }, [tens, units, singleDieLabel, singleDieValue, rollKey])
+
+  if (singleDieLabel !== undefined) {
+    return (
+      <div className="flex flex-col items-center gap-3" data-dice-theme={diceTheme.id}>
+        <D10Face
+          label={singleDieLabel}
+          valueText={singleDieValue !== null && singleDieValue !== undefined ? String(singleDieValue) : '--'}
+          rolling={isRolling}
+          tone="tens"
+          size={size}
+          fillClass={diceTheme.tensFillClass}
+          textClass={diceTheme.textColorClass}
+          glowClass={diceTheme.glowColorClass}
+          ringBorderClass={diceTheme.ringBorderClass}
+        />
+      </div>
+    )
+  }
 
   const tensText = tens !== null ? `${tens}0` : '--'
   const unitsText = units !== null ? `${units}` : '-'

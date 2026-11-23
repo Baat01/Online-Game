@@ -1,4 +1,5 @@
 export { ThemedCard, type ThemedCardProps } from './ThemedCard'
+export { TarotArcanaCard, type TarotArcanaCardProps } from './TarotArcanaCard'
 export { CardThemeSelector } from './CardThemeSelector'
 export { AnimatedDice } from './AnimatedDice'
 export { AnimatedCoinFlip } from './AnimatedCoinFlip'

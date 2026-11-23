@@ -19,9 +19,13 @@ import { createStandardDeck, shuffleDeck, drawCards } from '../deck'
 import {
   CARD_THEMES,
   CARD_THEME_LIST,
+  CARD_FRONT_THEME_LIST,
+  CARD_BACK_THEME_LIST,
   DICE_THEME_LIST,
   COIN_THEME_LIST,
   UNDERTALE_TAROT_ARCANA,
+  UNDERTALE_TAROT_DECK_META,
+  getThemePriceYen,
   getTarotArcanaForCard,
   isThemeUnlocked,
   useCardThemeStore,
@@ -125,19 +129,28 @@ describe('deck & cardThemes', () => {
     expect(remaining).toHaveLength(48)
   })
 
-  it('exposes all card, dice, coin, and Undertale Tarot themes with unlock checks', () => {
+  it('exposes Kinto & standard themes, isolates Undertale Tarot from 52-card fronts, and checks prices/unlocks', () => {
     expect(CARD_THEME_LIST.map((t) => t.id)).toEqual([
       'classic',
       'midnight-neon',
       'royal-fantasy',
       'minimalist',
-      'undertale-tarot',
+      'kinto-pay-to-win',
     ])
+    expect(CARD_FRONT_THEME_LIST.map((t) => t.id)).not.toContain('undertale-tarot')
+    expect(CARD_FRONT_THEME_LIST.map((t) => t.id)).toContain('kinto-pay-to-win')
+    expect(CARD_BACK_THEME_LIST.map((t) => t.id)).toContain('kinto-sovereign-back')
     expect(CARD_THEMES['midnight-neon'].name).toBe('Cyber Tokyo')
-    expect(DICE_THEME_LIST).toHaveLength(5)
-    expect(COIN_THEME_LIST).toHaveLength(5)
+    expect(DICE_THEME_LIST).toHaveLength(6)
+    expect(COIN_THEME_LIST).toHaveLength(6)
+    expect(DICE_THEME_LIST.map((d) => d.id)).toContain('kinto-gacha-dice')
+    expect(COIN_THEME_LIST.map((c) => c.id)).toContain('kinto-railgun-coin')
+    expect(getThemePriceYen('kinto-gacha-dice')).toBe(600)
+    expect(getThemePriceYen('kinto-railgun-coin')).toBe(1000)
+    expect(getThemePriceYen('undertale-tarot')).toBe(UNDERTALE_TAROT_DECK_META.priceYen)
     expect(UNDERTALE_TAROT_ARCANA).toHaveLength(22)
     expect(UNDERTALE_TAROT_ARCANA[0].name).toBe('Human')
+    expect(UNDERTALE_TAROT_ARCANA[0].meaningUpright.length).toBeGreaterThan(10)
     expect(UNDERTALE_TAROT_ARCANA[20].name).toBe('Sans')
     expect(UNDERTALE_TAROT_ARCANA[21].name).toBe('Mt. Ebott')
 

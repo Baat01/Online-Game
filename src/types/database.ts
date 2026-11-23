@@ -695,6 +695,36 @@ export type Database = {
           },
         ]
       }
+      yen_transactions: {
+        Row: {
+          amount: number
+          created_at: string
+          id: string
+          note: string | null
+          recipient_id: string | null
+          sender_id: string | null
+          transaction_type: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          id?: string
+          note?: string | null
+          recipient_id?: string | null
+          sender_id?: string | null
+          transaction_type?: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          id?: string
+          note?: string | null
+          recipient_id?: string | null
+          sender_id?: string | null
+          transaction_type?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

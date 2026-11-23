@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { clsx } from 'clsx'
 import { useOptionalAuthContext } from '@/contexts/AuthContext'
 import type { Rank, Suit } from '../deck'
@@ -11,6 +10,7 @@ import {
   type CardFrontThemeId,
   type CardFrontThemeConfig,
 } from '../themes'
+import { TarotArcanaCard } from './TarotArcanaCard'
 
 export interface ThemedCardProps {
   suit?: Suit
@@ -64,9 +64,117 @@ function SuitGlyph({ suit, className }: { suit: Suit; className?: string }) {
   }
 }
 
+function CourtCardIllustration({
+  rank,
+  suit,
+  isKinto,
+  size,
+}: {
+  rank: string
+  suit: Suit
+  isKinto: boolean
+  size: 'sm' | 'md' | 'lg'
+}) {
+  const frameCls = size === 'sm' ? 'w-8 h-10' : size === 'lg' ? 'w-14 h-20' : 'w-11 h-14'
+  const accentGold = isKinto ? '#facc15' : '#d97706'
+  const coatPrimary = isKinto ? '#18181b' : suit === 'hearts' || suit === 'diamonds' ? '#991b1b' : '#1e293b'
+  const coatSecondary = isKinto ? '#eab308' : '#b45309'
+
+  return (
+    <div
+      data-court-illustration={rank}
+      className={clsx(
+        'relative flex items-center justify-center rounded-md border overflow-hidden',
+        frameCls,
+        isKinto
+          ? 'border-amber-400/65 bg-stone-950/90'
+          : 'border-amber-600/40 bg-amber-950/5',
+      )}
+    >
+      <svg viewBox="0 0 64 84" className="w-full h-full" aria-hidden="true">
+        {/* Decorative royal medallion frame */}
+        <rect x="2" y="2" width="60" height="80" rx="5" fill="none" stroke={accentGold} strokeOpacity="0.45" strokeWidth="1.5" />
+        <line x1="6" y1="42" x2="58" y2="42" stroke={accentGold} strokeOpacity="0.25" strokeWidth="1" strokeDasharray="3 2" />
+
+        {rank === 'J' && (
+          <>
+            {/* Plumed herald cap */}
+            <path d="M18 23 Q32 10 46 23 L43 27 H21 Z" fill={coatPrimary} stroke={accentGold} strokeWidth="1.2" />
+            <path d="M25 14 Q36 5 49 14" fill="none" stroke={accentGold} strokeWidth="2.2" strokeLinecap="round" />
+            {/* Face & armor collar */}
+            <circle cx="32" cy="34" r="8" fill="#f3d6b6" stroke="#78350f" strokeWidth="1" />
+            <path d="M14 68 L22 44 H42 L50 68 Z" fill={coatPrimary} stroke={accentGold} strokeWidth="1.4" />
+            <path d="M22 44 L32 66 L42 44" fill={coatSecondary} fillOpacity="0.85" />
+            {/* Halberd weapon */}
+            <line x1="52" y1="12" x2="52" y2="74" stroke={accentGold} strokeWidth="2" />
+            <path d="M52 13 L59 20 L52 27 Z" fill={accentGold} />
+          </>
+        )}
+
+        {rank === 'Q' && (
+          <>
+            {/* Queen Tiara Crown */}
+            <path d="M20 25 L24 14 L32 20 L40 14 L44 25 Z" fill={accentGold} stroke="#78350f" strokeWidth="1" />
+            <circle cx="32" cy="14" r="2.2" fill="#dc2626" />
+            {/* Hair veil & face */}
+            <path d="M20 27 Q16 42 20 56 H44 Q48 42 44 27 Z" fill={coatPrimary} fillOpacity="0.85" />
+            <circle cx="32" cy="35" r="8" fill="#fde2c8" stroke="#78350f" strokeWidth="1" />
+            {/* Brocade gown & rose scepter */}
+            <path d="M14 74 L22 46 H42 L50 74 Z" fill={coatPrimary} stroke={accentGold} strokeWidth="1.4" />
+            <circle cx="32" cy="59" r="5" fill={accentGold} fillOpacity="0.9" />
+            <line x1="13" y1="30" x2="13" y2="72" stroke={accentGold} strokeWidth="1.6" />
+            <circle cx="13" cy="28" r="4" fill="#e11d48" stroke={accentGold} strokeWidth="1" />
+          </>
+        )}
+
+        {rank === 'K' && (
+          <>
+            {/* Sovereign Imperial Crown */}
+            <path d="M18 24 L21 11 L28 19 L32 9 L36 19 L43 11 L46 24 Z" fill={accentGold} stroke="#78350f" strokeWidth="1.2" />
+            {/* Face & regal beard */}
+            <circle cx="32" cy="33" r="8" fill="#f3d6b6" stroke="#78350f" strokeWidth="1" />
+            <path d="M25 36 Q32 45 39 36" fill="#44403c" />
+            {/* Mantle & sash */}
+            <path d="M12 74 L20 44 H44 L52 74 Z" fill={coatPrimary} stroke={accentGold} strokeWidth="1.6" />
+            <path d="M26 44 H38 L36 74 H28 Z" fill={coatSecondary} />
+            {/* Ceremonial sword */}
+            <line x1="52" y1="16" x2="52" y2="72" stroke="#e2e8f0" strokeWidth="2.2" />
+            <line x1="47" y1="54" x2="57" y2="54" stroke={accentGold} strokeWidth="2.2" />
+          </>
+        )}
+
+        {rank === 'JOKER' && (
+          <>
+            <path d="M19 30 Q14 14 27 20 Q32 9 37 20 Q50 14 45 30 Z" fill={accentGold} stroke="#991b1b" strokeWidth="1.2" />
+            <circle cx="19" cy="18" r="2.5" fill="#dc2626" />
+            <circle cx="32" cy="11" r="2.5" fill="#dc2626" />
+            <circle cx="45" cy="18" r="2.5" fill="#dc2626" />
+            <circle cx="32" cy="39" r="8" fill="#fde68a" />
+            <path d="M16 72 L24 49 H40 L48 72 Z" fill="#991b1b" stroke={accentGold} strokeWidth="1.5" />
+          </>
+        )}
+
+        {/* Small suit emblem at base of portrait */}
+        <circle cx="32" cy="74" r="6" fill="#09090b" fillOpacity="0.65" stroke={accentGold} strokeWidth="0.9" />
+      </svg>
+    </div>
+  )
+}
+
 function CourtBadge({ rank, theme }: { rank: string; theme: CardFrontThemeConfig }) {
-  if (!['J', 'Q', 'K', 'A'].includes(rank)) return null
-  const label = rank === 'K' ? '👑' : rank === 'Q' ? '✦' : rank === 'J' ? '⚔' : '★'
+  if (!['J', 'Q', 'K', 'A', 'JOKER'].includes(rank)) return null
+  const label =
+    rank === 'K'
+      ? '👑'
+      : rank === 'Q'
+        ? '✦'
+        : rank === 'J'
+          ? '⚔'
+          : rank === 'JOKER'
+            ? '★'
+            : theme.id === 'kinto-pay-to-win'
+              ? '100¥'
+              : '★'
 
   return (
     <span
@@ -98,7 +206,6 @@ export function ThemedCard({
 }: ThemedCardProps) {
   const auth = useOptionalAuthContext()
   const { frontThemeId: storeFrontId, backThemeId: storeBackId } = useCardTheme()
-  const [imgError, setImgError] = useState(false)
 
   const frontTheme = resolveFrontTheme(
     frontThemeId ?? auth?.profile?.card_front_theme ?? storeFrontId,
@@ -110,6 +217,21 @@ export function ThemedCard({
   const isTarot = !isHidden && frontTheme.id === 'undertale-tarot'
   const arcanum = isTarot ? getTarotArcanaForCard(suit, rank) : null
 
+  if (isTarot && arcanum) {
+    return (
+      <TarotArcanaCard
+        arcanum={arcanum}
+        size={size}
+        selected={selected}
+        onClick={onClick && playable && !disabled ? onClick : undefined}
+        className={className}
+      />
+    )
+  }
+
+  const rankStr = String(rank)
+  const isCourtCard = ['J', 'Q', 'K', 'JOKER'].includes(rankStr)
+  const isKinto = frontTheme.id === 'kinto-pay-to-win'
   const isInteractive = Boolean(onClick && playable && !disabled)
   const suitClass = frontTheme.suitColorClass[suit]
   const sizeClass = SIZE_CLASSES[size]
@@ -139,76 +261,34 @@ export function ThemedCard({
         {backTheme.emblemSymbol}
       </div>
     </div>
-  ) : isTarot && arcanum ? (
-    <div className="relative w-full h-full flex flex-col justify-between overflow-hidden rounded-md border border-amber-400/50 bg-black/40 p-0.5">
-      {/* Top bar: corner rank/suit + Roman numeral */}
-      <div className="flex items-center justify-between px-1 pt-0.5 z-10">
-        <div className={clsx('flex items-center gap-0.5 font-extrabold leading-none', suitClass)}>
-          <span className={size === 'sm' ? 'text-[10px]' : 'text-xs'}>{rank}</span>
-          <SuitGlyph suit={suit} className={size === 'sm' ? 'size-2.5' : 'size-3'} />
-        </div>
-        <span className="px-1 py-0.2 rounded bg-amber-500/20 border border-amber-400/50 text-[9px] font-serif font-bold text-amber-200">
-          {arcanum.roman}
-        </span>
-      </div>
-
-      {/* Center Tarot Artwork */}
-      <div className="relative flex-1 my-0.5 overflow-hidden rounded border border-amber-500/35 bg-stone-950 flex items-center justify-center">
-        {!imgError ? (
-          <img
-            src={arcanum.imagePath}
-            alt={`${arcanum.roman} — ${arcanum.name}`}
-            onError={() => setImgError(true)}
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div className="flex flex-col items-center justify-center p-1 text-center">
-            <span className="text-xs font-serif font-bold text-amber-300">{arcanum.roman}</span>
-            <SuitGlyph suit={suit} className={clsx('size-5 my-0.5', suitClass)} />
-          </div>
-        )}
-      </div>
-
-      {/* Bottom Arcana Title */}
-      <div className="px-1 pb-0.5 text-center z-10">
-        <p className="text-[9px] font-serif font-bold uppercase tracking-wider text-amber-200 truncate leading-tight">
-          {arcanum.name}
-        </p>
-        {seasonLabel && (
-          <p className="text-[8px] text-amber-400/80 uppercase leading-none">{seasonLabel}</p>
-        )}
-      </div>
-
-      {modifierBadge && (
-        <span
-          className={clsx(
-            'absolute -top-2 -right-2 px-1.5 py-0.5 rounded-full text-[10px] font-extrabold shadow border z-20',
-            modifierBadge.startsWith('-')
-              ? 'bg-rose-600 text-white border-rose-300'
-              : 'bg-emerald-600 text-white border-emerald-300',
-          )}
-        >
-          {modifierBadge}
-        </span>
-      )}
-    </div>
   ) : (
     <>
+      {isKinto && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-1 rounded-lg border border-amber-400/25"
+        />
+      )}
+
       {/* Top corner */}
-      <div className={clsx('flex items-start justify-between leading-none font-bold', suitClass)}>
+      <div className={clsx('flex items-start justify-between leading-none font-bold relative z-10', suitClass)}>
         <div className="flex flex-col items-center">
-          <span>{rank}</span>
+          <span>{rankStr === 'JOKER' ? 'J★' : rankStr}</span>
           <SuitGlyph suit={suit} className={size === 'sm' ? 'size-2.5 mt-0.5' : 'size-3.5 mt-0.5'} />
         </div>
-        <CourtBadge rank={String(rank)} theme={frontTheme} />
+        <CourtBadge rank={rankStr} theme={frontTheme} />
       </div>
 
-      {/* Center pip */}
-      <div className={clsx('flex flex-col items-center justify-center my-auto', suitClass)}>
-        <SuitGlyph
-          suit={suit}
-          className={size === 'sm' ? 'size-5' : size === 'lg' ? 'size-10' : 'size-7'}
-        />
+      {/* Center pip or Illustrated Court Portrait */}
+      <div className={clsx('flex flex-col items-center justify-center my-auto relative z-10', suitClass)}>
+        {isCourtCard ? (
+          <CourtCardIllustration rank={rankStr} suit={suit} isKinto={isKinto} size={size} />
+        ) : (
+          <SuitGlyph
+            suit={suit}
+            className={size === 'sm' ? 'size-5' : size === 'lg' ? 'size-10' : 'size-7'}
+          />
+        )}
         {seasonLabel && (
           <span className="mt-0.5 text-[9px] font-semibold uppercase tracking-wider opacity-80">
             {seasonLabel}
@@ -219,12 +299,12 @@ export function ThemedCard({
       {/* Bottom corner */}
       <div
         className={clsx(
-          'flex items-end justify-between leading-none font-bold rotate-180',
+          'flex items-end justify-between leading-none font-bold rotate-180 relative z-10',
           suitClass,
         )}
       >
         <div className="flex flex-col items-center">
-          <span>{rank}</span>
+          <span>{rankStr === 'JOKER' ? 'J★' : rankStr}</span>
           <SuitGlyph suit={suit} className={size === 'sm' ? 'size-2.5 mt-0.5' : 'size-3.5 mt-0.5'} />
         </div>
       </div>
@@ -233,7 +313,7 @@ export function ThemedCard({
       {modifierBadge && (
         <span
           className={clsx(
-            'absolute -top-2 -right-2 px-1.5 py-0.5 rounded-full text-[10px] font-extrabold shadow border',
+            'absolute -top-2 -right-2 px-1.5 py-0.5 rounded-full text-[10px] font-extrabold shadow border z-20',
             modifierBadge.startsWith('-')
               ? 'bg-rose-600 text-white border-rose-300'
               : 'bg-emerald-600 text-white border-emerald-300',
@@ -248,7 +328,6 @@ export function ThemedCard({
   const commonDataProps = {
     'data-front-theme': frontTheme.id,
     'data-back-theme': backTheme.id,
-    ...(arcanum ? { 'data-tarot-arcana': arcanum.name } : {}),
   }
 
   if (onClick) {
@@ -258,7 +337,7 @@ export function ThemedCard({
         onClick={isInteractive ? onClick : undefined}
         disabled={!isInteractive}
         {...commonDataProps}
-        aria-label={ariaLabel ?? (isHidden ? 'Hidden card' : `${rank} of ${suit}`)}
+        aria-label={ariaLabel ?? (isHidden ? 'Hidden card' : `${rankStr} of ${suit}`)}
         className={baseClasses}
       >
         {content}
@@ -269,7 +348,7 @@ export function ThemedCard({
   return (
     <div
       {...commonDataProps}
-      aria-label={ariaLabel ?? (isHidden ? 'Hidden card' : `${rank} of ${suit}`)}
+      aria-label={ariaLabel ?? (isHidden ? 'Hidden card' : `${rankStr} of ${suit}`)}
       className={baseClasses}
     >
       {content}

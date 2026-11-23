@@ -19,6 +19,7 @@ import {
   type CardBackThemeId,
   type CardFrontThemeConfig,
   type CardFrontThemeId,
+  type StandardCardFrontThemeId,
   type CardThemeConfig,
   type CardThemeId,
   type CoinThemeConfig,
@@ -53,11 +54,13 @@ export const useCardThemeStore = create<CardThemeState>()(
           const mappedBack: CardBackThemeId =
             themeId === 'midnight-neon'
               ? 'midnight-neon'
-              : themeId === 'royal-fantasy' || themeId === 'undertale-tarot'
-                ? 'bami-gold'
-                : themeId === 'minimalist'
-                  ? 'obsidian-minimalist'
-                  : 'engei-crimson'
+              : themeId === 'kinto-pay-to-win'
+                ? 'kinto-sovereign-back'
+                : themeId === 'royal-fantasy'
+                  ? 'bami-gold'
+                  : themeId === 'minimalist'
+                    ? 'obsidian-minimalist'
+                    : 'engei-crimson'
           set({ themeId, frontThemeId: themeId, backThemeId: mappedBack })
         }
       },
@@ -127,7 +130,7 @@ export function useCardTheme(): {
   const backTheme = resolveBackTheme(backThemeId)
   const diceTheme = resolveDiceTheme(diceThemeId)
   const coinTheme = resolveCoinTheme(coinThemeId)
-  const theme = CARD_THEMES[themeId] ?? CARD_THEMES.classic
+  const theme = CARD_THEMES[themeId as StandardCardFrontThemeId] ?? CARD_THEMES.classic
 
   return {
     themeId,

@@ -50,6 +50,7 @@ export function useGenericGame<T extends BaseGameState>(
   const payoutCheckRef = useRef(false)
 
   useEffect(() => {
+    if (actionLockRef.current) return
     metadataRef.current = room?.metadata
     if (isInitializedState<T>(room?.metadata)) {
       setGameState(room.metadata)

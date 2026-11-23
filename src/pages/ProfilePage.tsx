@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useBlocker } from 'react-router-dom'
-import { UserCircle2, Coins, Shield, PlusCircle, LockOpen, Lock } from 'lucide-react'
+import { UserCircle2, Coins, Shield, PlusCircle, LockOpen, Lock, Send } from 'lucide-react'
 import { AvatarUploader } from '@/components/profile/AvatarUploader'
 import { ProfileForm } from '@/components/profile/ProfileForm'
 import { Card } from '@/components/ui/Card'
@@ -17,7 +17,10 @@ import {
   adminUnlockAllThemes,
   DEFAULT_YEN_BALANCE,
   formatYen,
+  getRecentYenTransactions,
   listProfilesForAdmin,
+  transferYen,
+  type YenTransaction,
 } from '@/services/wallet/walletService'
 import { DEMO_GUEST_ID } from '@/lib/localSupabase'
 import type { Profile } from '@/types/auth'
@@ -46,20 +49,72 @@ export function ProfilePage() {
   const [adminTargets, setAdminTargets] = useState<Profile[]>([])
   const [selectedTargetId, setSelectedTargetId] = useState<string>(DEMO_GUEST_ID)
   const [isTogglingTheme, setIsTogglingTheme] = useState(false)
+  const [transferRecipientId, setTransferRecipientId] = useState<string>('')
+  const [transferAmount, setTransferAmount] = useState('500')
+  const [transferNote, setTransferNote] = useState('')
+  const [isTransferring, setIsTransferring] = useState(false)
+  const [recentTransactions, setRecentTransactions] = useState<YenTransaction[]>([])
 
   useEffect(() => {
-    if (!profile?.is_admin) return
-    listProfilesForAdmin()
+    if (!profile?.id) return
+    let active = true
+    Promise.resolve()
+      .then(() => listProfilesForAdmin())
       .then((list) => {
+        if (!active || !Array.isArray(list)) return
         setAdminTargets(list)
-        const nonAdmin = list.find((p) => p.id !== profile.id)
-        if (nonAdmin) setSelectedTargetId(nonAdmin.id)
-        else if (list[0]) setSelectedTargetId(list[0].id)
+        const others = list.filter((p) => p.id !== profile.id)
+        if (others[0]) {
+          setSelectedTargetId(others[0].id)
+          setTransferRecipientId((prev) => prev || others[0].id)
+        } else if (list[0]) {
+          setSelectedTargetId(list[0].id)
+        }
       })
       .catch(() => {})
-  }, [profile?.is_admin, profile?.id])
+
+    Promise.resolve()
+      .then(() => getRecentYenTransactions(profile.id, 8))
+      .then((txs) => {
+        if (active && Array.isArray(txs)) setRecentTransactions(txs)
+      })
+      .catch(() => {})
+
+    return () => {
+      active = false
+    }
+  }, [profile?.id])
 
   const selectedTarget = adminTargets.find((p) => p.id === selectedTargetId) ?? null
+  const transferRecipients = adminTargets.filter((p) => p.id !== profile?.id)
+
+  const handleTransferYen = async () => {
+    if (!profile?.id || !transferRecipientId) {
+      toast('Sélectionnez un destinataire.', 'error')
+      return
+    }
+    const parsed = parseInt(transferAmount, 10)
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      toast('Entrez un montant valide supérieur à 0 ¥.', 'error')
+      return
+    }
+    setIsTransferring(true)
+    try {
+      const { transaction } = await transferYen(profile.id, transferRecipientId, parsed, transferNote)
+      setRecentTransactions((prev) => [transaction, ...prev].slice(0, 8))
+      setTransferNote('')
+      await Promise.all([refresh(), refreshProfile()])
+      const recip = transferRecipients.find((p) => p.id === transferRecipientId)
+      toast(
+        `${formatYen(parsed)} envoyés à ${recip?.display_name ?? recip?.username ?? 'destinataire'} !`,
+        'success',
+      )
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Erreur lors du virement.', 'error')
+    } finally {
+      setIsTransferring(false)
+    }
+  }
 
   const handleToggleUnlockTheme = async (themeId: string, currentlyUnlocked: boolean) => {
     if (!selectedTarget) return
@@ -263,6 +318,99 @@ export function ProfilePage() {
                   <Shield className="size-3.5" aria-hidden="true" />
                   Admin · ¥ Illimités (∞ ¥)
                 </span>
+              )}
+            </div>
+
+            {/* ── Envoyer des Yens (Virement ENGEI P2P) ── */}
+            <div className="space-y-3 pt-2 border-t border-surface-700/70">
+              <p className="text-xs font-semibold text-gold-400 uppercase tracking-wider">
+                Envoyer des Yens (¥) — Virement ENGEI
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <select
+                  aria-label="Destinataire du virement"
+                  value={transferRecipientId}
+                  onChange={(e) => setTransferRecipientId(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-btn bg-surface-900 border border-surface-600 text-xs text-slate-100"
+                >
+                  {transferRecipients.length === 0 ? (
+                    <option value="">Aucun autre joueur</option>
+                  ) : (
+                    transferRecipients.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.display_name ?? p.username} (@{p.username})
+                      </option>
+                    ))
+                  )}
+                </select>
+                <input
+                  type="number"
+                  min={1}
+                  value={transferAmount}
+                  onChange={(e) => setTransferAmount(e.target.value)}
+                  aria-label="Montant du virement en ¥"
+                  placeholder="Montant ¥"
+                  className="px-3 py-1.5 rounded-btn bg-surface-900 border border-surface-600 text-sm font-mono text-slate-100"
+                />
+                <input
+                  type="text"
+                  maxLength={140}
+                  value={transferNote}
+                  onChange={(e) => setTransferNote(e.target.value)}
+                  aria-label="Note de virement"
+                  placeholder="Note (optionnelle)"
+                  className="px-3 py-1.5 rounded-btn bg-surface-900 border border-surface-600 text-xs text-slate-100"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="primary"
+                  isLoading={isTransferring}
+                  disabled={!transferRecipientId}
+                  onClick={() => void handleTransferYen()}
+                  leftIcon={<Send className="size-3.5" />}
+                >
+                  Envoyer des Yens
+                </Button>
+              </div>
+
+              {recentTransactions.length > 0 && (
+                <div className="space-y-1.5 pt-2">
+                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                    Historique récent
+                  </p>
+                  <ul className="space-y-1 text-xs">
+                    {recentTransactions.map((tx) => {
+                      const isIncoming = tx.recipient_id === profile.id
+                      const label =
+                        tx.transaction_type === 'shop_purchase'
+                          ? tx.note ?? 'Achat Boutique ENGEI'
+                          : isIncoming
+                            ? `Reçu${tx.note ? ` · ${tx.note}` : ''}`
+                            : `Envoyé${tx.note ? ` · ${tx.note}` : ''}`
+                      return (
+                        <li
+                          key={tx.id}
+                          className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded bg-surface-900/70 border border-surface-700/70"
+                        >
+                          <span className="text-slate-300 truncate">{label}</span>
+                          <span
+                            className={
+                              isIncoming
+                                ? 'font-mono font-bold text-emerald-300 shrink-0'
+                                : 'font-mono font-bold text-amber-300 shrink-0'
+                            }
+                          >
+                            {isIncoming ? '+' : '-'}
+                            {formatYen(tx.amount)}
+                          </span>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
               )}
             </div>
 
