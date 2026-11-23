@@ -1,6 +1,7 @@
 import { ArrowLeft, Coins, Eye, Moon, Skull, Sparkles, Star, Sun, ShieldAlert } from 'lucide-react'
 import { clsx } from 'clsx'
 import { Button } from '@/components/ui/Button'
+import { GameRulesButton } from '@/games/_shared/components'
 import { formatYen } from '@/services/wallet/walletService'
 import type { Arcane23State } from '../engine/arcane23Engine'
 import type { InspectedTarotInfo } from './TarotDetailModal'
@@ -106,6 +107,8 @@ export function GameStatus({
               Cagnotte : {formatYen(potYen)}
             </span>
           )}
+
+          <GameRulesButton gameSlug="23e-arcane" />
         </div>
       </div>
 

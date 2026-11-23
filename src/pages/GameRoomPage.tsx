@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { LogOut, Rocket, UserPlus, Coins, Shield } from 'lucide-react'
+import { Coins, Globe, Lock, LogOut, Rocket, Shield, UserPlus } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
+import { clsx } from 'clsx'
 import { useAuth } from '@/hooks/useAuth'
 import { useRoom, useOutgoingInvites, useLobby, lobbyKeys } from '@/hooks/useLobby'
 import { usePresence } from '@/hooks/usePresence'
@@ -13,7 +14,7 @@ import { ReadyToggle } from '@/components/lobby/ReadyToggle'
 import { InviteModal } from '@/components/lobby/InviteModal'
 import { EmptyRoomState } from '@/components/lobby/EmptyRoomState'
 import { RoomPageSkeleton } from '@/components/lobby/LobbySkeleton'
-import { CardThemeSelector } from '@/games/_shared/components'
+import { CardThemeSelector, GameRulesButton } from '@/games/_shared/components'
 import {
   PRESET_YEN_STAKES,
   formatYen,
@@ -24,13 +25,9 @@ import {
 /**
  * Game Room page — /room/:roomId (protected).
  *
- * Sections:
- *  - RoomHeader: game name, state, player count, share link
- *  - Players list: RoomPlayerCard per player, host controls (kick)
- *  - Actions: ReadyToggle (players), LaunchGame (host), Leave Room, Invite Friends
- *  - InviteModal: friend search + invite
- *
- * Realtime updates via useRoom (subscribeToRoom).
+ * Keeps players synced via Realtime + 2-second adaptive safety polling while waiting,
+ * automatically reconnects on mobile wake (visibilitychange/online), and redirects
+ * all seated players immediately when room.state transitions to 'playing'.
  */
 export function GameRoomPage() {
   const { roomId } = useParams<{ roomId: string }>()
@@ -40,11 +37,17 @@ export function GameRoomPage() {
   const { toast } = useToast()
 
   // ── Room data + realtime ─────────────────────────────────────────────────
-  const { data: room, isLoading: isRoomLoading, error: roomError } = useRoom(roomId ?? '')
+  const {
+    data: room,
+    isLoading: isRoomLoading,
+    error: roomError,
+    refetch: refetchRoom,
+  } = useRoom(roomId ?? '')
   const { data: outgoingInvites = [] } = useOutgoingInvites(roomId ?? '')
 
   const {
     setReady,
+    updateRoomVisibility,
     launchGame,
     kickPlayer,
     leaveRoom,
@@ -59,6 +62,7 @@ export function GameRoomPage() {
   const [isInviteOpen, setIsInviteOpen] = useState(false)
   const [pendingKick, setPendingKick] = useState<string | null>(null)
   const [pendingReady, setPendingReady] = useState(false)
+  const [pendingVisibility, setPendingVisibility] = useState(false)
   const [pendingLaunch, setPendingLaunch] = useState(false)
   const [pendingLeave, setPendingLeave] = useState(false)
   const [pendingStake, setPendingStake] = useState(false)
@@ -69,27 +73,54 @@ export function GameRoomPage() {
   const isAdmin = Boolean(profile?.is_admin)
   const myPlayer = room?.players.find((p) => p.userId === user?.id)
   const isReady = myPlayer?.ready ?? false
-  const canLaunch = isHost && room?.state === 'ready'
+  const allPlayersReady =
+    Boolean(room) &&
+    (room?.players.length ?? 0) >= 2 &&
+    Boolean(room?.players.every((p) => p.ready))
+  const canLaunch = isHost && (room?.state === 'ready' || (room?.state === 'waiting' && allPlayersReady))
   const isPlaying = room?.state === 'playing'
   const isFinished = room?.state === 'finished' || room?.state === 'cancelled'
+  const isPublic = room?.isPublic ?? true
   const activeStake = getRoomStake(room)
 
-  // ── Auto-enter game table for all seated players when room transitions to playing ──
+  // ── Adaptive 2-second safety polling & mobile wake sync while waiting/ready ──
+  useEffect(() => {
+    if (!roomId || isPlaying || isFinished) return
+
+    const syncNow = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      if (typeof refetchRoom === 'function') {
+        void refetchRoom()
+      } else {
+        void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) })
+      }
+    }
+
+    const intervalId = window.setInterval(syncNow, 2000)
+    window.addEventListener('online', syncNow)
+    window.addEventListener('focus', syncNow)
+    document.addEventListener('visibilitychange', syncNow)
+
+    return () => {
+      window.clearInterval(intervalId)
+      window.removeEventListener('online', syncNow)
+      window.removeEventListener('focus', syncNow)
+      document.removeEventListener('visibilitychange', syncNow)
+    }
+  }, [roomId, isPlaying, isFinished, refetchRoom, queryClient])
+
+  // ── Auto-enter game table for all seated players as soon as room.state === 'playing' ──
   useEffect(() => {
     if (!roomId || !room || room.state !== 'playing') return
-    if (!myPlayer) return
+    if (!myPlayer && !isHost) return
 
     const targetPath =
       room.gameSlug === 'blackjack'
         ? `/room/${roomId}/play`
         : `/room/${roomId}/play/${room.gameSlug}`
 
-    const timer = window.setTimeout(() => {
-      navigate(targetPath)
-    }, 250)
-
-    return () => window.clearTimeout(timer)
-  }, [roomId, room, myPlayer, navigate])
+    navigate(targetPath)
+  }, [roomId, room, myPlayer, isHost, navigate])
 
   const handleStakeChange = async (nextStake: number) => {
     if (!roomId || !user) return
@@ -113,7 +144,26 @@ export function GameRoomPage() {
     }
   }
 
-  // ── Handlers ─────────────────────────────────────────────────────────────
+  const handleVisibilityToggle = async (nextPublic: boolean) => {
+    if (!roomId || !isHost || !updateRoomVisibility || nextPublic === isPublic) return
+    setPendingVisibility(true)
+    try {
+      await updateRoomVisibility(roomId, nextPublic)
+      toast(
+        nextPublic
+          ? 'Salle désormais Publique — visible dans le Lobby.'
+          : 'Salle désormais Privée — accès sur invitation uniquement.',
+        'info',
+      )
+    } catch (err) {
+      toast(
+        err instanceof Error ? err.message : 'Impossible de modifier la visibilité de la salle.',
+        'error',
+      )
+    } finally {
+      setPendingVisibility(false)
+    }
+  }
 
   const handleReady = async (ready: boolean) => {
     if (!roomId) return
@@ -132,10 +182,8 @@ export function GameRoomPage() {
     setPendingLaunch(true)
     try {
       await launchGame(roomId)
-      // Phase 4/5: navigate to game view
       if (room?.gameSlug) {
         if (room.gameSlug === 'blackjack') {
-          // Backward compatibility for existing hardcoded route
           navigate(`/room/${roomId}/play`)
         } else {
           navigate(`/room/${roomId}/play/${room.gameSlug}`)
@@ -153,7 +201,6 @@ export function GameRoomPage() {
     setPendingLeave(true)
     try {
       await leaveRoom(roomId)
-      // Navigation to /games happens inside useLobby.leaveRoom onSuccess
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to leave room.', 'error')
       setPendingLeave(false)
@@ -178,8 +225,6 @@ export function GameRoomPage() {
     toast('Invitation sent!', 'success')
   }
 
-  // ── Error / Loading states ────────────────────────────────────────────────
-
   if (!roomId) {
     navigate('/games', { replace: true })
     return null
@@ -203,10 +248,6 @@ export function GameRoomPage() {
       </div>
     )
   }
-
-  // ─────────────────────────────────────────────
-  // Render
-  // ─────────────────────────────────────────────
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8 sm:py-12 animate-fade-in space-y-4">
@@ -251,6 +292,53 @@ export function GameRoomPage() {
       {/* Lobby section (waiting / ready) */}
       {!isPlaying && !isFinished && (
         <>
+          {/* Public / Private Room Selector (Host only) */}
+          {isHost && (
+            <section
+              aria-label="Visibilité de la salle"
+              className="rounded-card bg-surface-800 border border-surface-700 p-4 flex flex-wrap items-center justify-between gap-3"
+            >
+              <div>
+                <p className="text-sm font-bold text-slate-100">Visibilité du salon</p>
+                <p className="text-xs text-slate-400">
+                  {isPublic
+                    ? 'Visible dans la liste des salons ouverts du Lobby.'
+                    : 'Masqué du Lobby — seuls les joueurs invités ou ayant le lien peuvent rejoindre.'}
+                </p>
+              </div>
+              <div className="inline-flex items-center rounded-xl bg-surface-900 border border-surface-700 p-1 gap-1">
+                <button
+                  type="button"
+                  disabled={pendingVisibility}
+                  onClick={() => void handleVisibilityToggle(true)}
+                  className={clsx(
+                    'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer',
+                    isPublic
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                      : 'text-slate-400 hover:text-slate-200',
+                  )}
+                >
+                  <Globe className="size-3.5" aria-hidden="true" />
+                  Salle Publique
+                </button>
+                <button
+                  type="button"
+                  disabled={pendingVisibility}
+                  onClick={() => void handleVisibilityToggle(false)}
+                  className={clsx(
+                    'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer',
+                    !isPublic
+                      ? 'bg-brand-500/20 text-brand-300 border border-brand-500/40'
+                      : 'text-slate-400 hover:text-slate-200',
+                  )}
+                >
+                  <Lock className="size-3.5" aria-hidden="true" />
+                  Salle Privée
+                </button>
+              </div>
+            </section>
+          )}
+
           {/* Mise en Yen (¥) — Trésorerie ENGEI */}
           <section
             aria-labelledby="stake-heading"
@@ -270,7 +358,7 @@ export function GameRoomPage() {
               </span>
             </div>
 
-            {(isHost || isAdmin) ? (
+            {isHost || isAdmin ? (
               <div className="space-y-2.5">
                 <div className="flex flex-wrap gap-1.5">
                   {PRESET_YEN_STAKES.map((amount) => {
@@ -361,8 +449,8 @@ export function GameRoomPage() {
           </section>
 
           {/* Action bar */}
-          <div className="flex flex-col sm:flex-row gap-2 pt-2">
-            {/* Ready toggle (non-host or anyone) */}
+          <div className="flex flex-wrap items-center gap-2 pt-2">
+            {/* Ready toggle */}
             <ReadyToggle
               isReady={isReady}
               isLoading={pendingReady}
@@ -370,7 +458,7 @@ export function GameRoomPage() {
               disabled={isPlaying}
             />
 
-            {/* Launch — host only when state=ready */}
+            {/* Launch — host only when all seated players are ready */}
             {canLaunch && (
               <Button
                 id="launch-game-btn"
@@ -396,6 +484,9 @@ export function GameRoomPage() {
             >
               Invite Friends
             </Button>
+
+            {/* Game Rules */}
+            <GameRulesButton gameSlug={room.gameSlug} size="md" variant="secondary" />
 
             {/* Customize Player Cards */}
             <CardThemeSelector mode="modal" compact />

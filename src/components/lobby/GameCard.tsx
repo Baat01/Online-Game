@@ -1,4 +1,4 @@
-import { Users } from 'lucide-react'
+import { BookOpen, Users } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import type { IGamePlugin } from '@/types/game'
 
@@ -6,14 +6,14 @@ interface GameCardProps {
   game: IGamePlugin
   isCreating?: boolean
   onCreateRoom: (gameSlug: string) => void
+  onOpenRules?: (gameSlug: string) => void
 }
 
 /**
  * Game catalogue card — displayed on the /games page.
- * Shows game icon, name, description, player count, and a create-room button.
- * When the game is not available, shows a "Coming Soon" badge instead of the button.
+ * Shows game icon, name, description, player count, rules button, and create-room button.
  */
-export function GameCard({ game, isCreating = false, onCreateRoom }: GameCardProps) {
+export function GameCard({ game, isCreating = false, onCreateRoom, onOpenRules }: GameCardProps) {
   const Icon = game.icon
 
   return (
@@ -42,11 +42,24 @@ export function GameCard({ game, isCreating = false, onCreateRoom }: GameCardPro
         </div>
 
         {/* Player count */}
-        <div className="flex items-center gap-1.5 text-xs text-slate-500">
-          <Users className="size-3.5" aria-hidden="true" />
-          <span>
-            {game.minPlayers}–{game.maxPlayers} players
+        <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
+          <span className="inline-flex items-center gap-1.5">
+            <Users className="size-3.5" aria-hidden="true" />
+            <span>
+              {game.minPlayers}–{game.maxPlayers} players
+            </span>
           </span>
+          {onOpenRules && (
+            <button
+              type="button"
+              onClick={() => onOpenRules(game.slug)}
+              aria-label={`Règles de ${game.name}`}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-surface-900/80 border border-surface-600 hover:border-gold-400/60 text-gold-300 text-xs font-semibold transition-colors cursor-pointer"
+            >
+              <BookOpen className="size-3.5" aria-hidden="true" />
+              Règles
+            </button>
+          )}
         </div>
 
         {/* Action */}

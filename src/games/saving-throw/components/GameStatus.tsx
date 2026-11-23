@@ -1,6 +1,7 @@
 import { Dices, ArrowLeft, Trophy, Coins } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { formatYen } from '@/services/wallet/walletService'
+import { GameRulesButton } from '../../_shared/components'
 import type { SavingThrowState } from '../engine/savingThrowEngine'
 
 interface GameStatusProps {
@@ -64,6 +65,7 @@ export function GameStatus({
           ))}
         </div>
 
+        <GameRulesButton gameSlug="saving-throw" />
         <Button
           size="sm"
           variant="ghost"

@@ -16,6 +16,7 @@ const ACTIVE_USER_SESSION_KEY = 'card_arena_active_user_id'
 
 export const DEMO_HOST_ID = '00000000-0000-4000-8000-000000000001'
 export const DEMO_GUEST_ID = '00000000-0000-4000-8000-000000000002'
+export const BAMI_ADMIN_ID = '00000000-0000-4000-8000-000000000003'
 
 type Row = Record<string, unknown>
 type TableData = Record<string, Row[]>
@@ -46,9 +47,40 @@ function createInitialDb(): LocalDbState {
     users: [
       { id: DEMO_HOST_ID, email: 'alex@engei.local', password: 'password123', username: 'alex_host' },
       { id: DEMO_GUEST_ID, email: 'sam@engei.local', password: 'password123', username: 'sam_challenger' },
+      { id: BAMI_ADMIN_ID, email: 'bami@gmail.fr', password: 'admin0', username: 'bami' },
     ],
     tables: {
       profiles: [
+        {
+          id: BAMI_ADMIN_ID,
+          username: 'bami',
+          display_name: 'Bami',
+          bio: 'Administrateur — Cercle Bami',
+          avatar_url: null,
+          is_online: true,
+          last_seen: ts,
+          created_at: ts,
+          updated_at: ts,
+          yen_balance: 500000,
+          is_admin: true,
+          permissions: {
+            can_create_accounts: true,
+            can_grant_themes: true,
+            can_set_custom_stakes: true,
+            unlimited_yen: true,
+          },
+          clan_title: 'Clan Momobami',
+          card_back_theme: 'bami-gold',
+          card_front_theme: 'royal-fantasy',
+          dice_theme: 'obsidian-gold',
+          coin_theme: 'momobami-seal',
+          unlocked_themes: [
+            'classic', 'royal-fantasy', 'minimalist', 'midnight-neon', 'undertale-tarot', 'kinto-pay-to-win',
+            'engei-crimson', 'bami-gold', 'obsidian-minimalist', 'kinto-sovereign-back',
+            'obsidian-gold', 'crimson-engei', 'ivory-academy', 'cyber-tokyo', 'astral-crystal', 'kinto-gacha-dice',
+            'classic-yen', 'momobami-seal', 'engei-scarlet', 'railgun-coin', 'eclipse-medal', 'kinto-railgun-coin',
+          ],
+        },
         {
           id: DEMO_HOST_ID,
           username: 'alex_host',
@@ -249,6 +281,12 @@ function loadDb(): LocalDbState {
     parsed.tables.yen_transactions ??= []
     if (Array.isArray(parsed.tables.profiles)) {
       parsed.tables.profiles = parsed.tables.profiles.map(hydrateProfileDefaults)
+    }
+    if (Array.isArray(parsed.tables.game_rooms)) {
+      parsed.tables.game_rooms = parsed.tables.game_rooms.map((r) => ({
+        is_public: true,
+        ...r,
+      }))
     }
     return parsed
   } catch {
@@ -747,6 +785,7 @@ class LocalQueryBuilder {
         if (this.table === 'game_rooms') {
           row.state = row.state ?? 'waiting'
           row.max_players = row.max_players ?? 6
+          row.is_public = row.is_public ?? true
           row.metadata = row.metadata ?? {}
           row.started_at = row.started_at ?? null
         }
@@ -988,6 +1027,8 @@ export function createLocalSupabaseClient(): SupabaseClient<Database> {
     channel(name: string) {
       const ch = { name, listeners: [] as ChannelListener[] }
       const api = {
+        name,
+        state: 'closed' as string,
         on(
           type: string,
           opts: { event?: string; table?: string; filter?: string },
@@ -1003,8 +1044,12 @@ export function createLocalSupabaseClient(): SupabaseClient<Database> {
           }
           return api
         },
-        subscribe() {
+        subscribe(statusCb?: (status: string) => void) {
+          api.state = 'joined'
           activeChannels.add(ch)
+          if (statusCb) {
+            queueMicrotask(() => statusCb('SUBSCRIBED'))
+          }
           return api
         },
       }

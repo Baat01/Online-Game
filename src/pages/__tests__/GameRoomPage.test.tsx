@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import type { GameRoom } from '@/types/lobby'
@@ -21,6 +21,7 @@ const mockRoom: GameRoom = {
   hostId: HOST_ID,
   state: 'waiting',
   maxPlayers: 6,
+  isPublic: true,
   createdAt: '2024-01-01T00:00:00Z',
   startedAt: null,
   players: [
@@ -72,13 +73,15 @@ vi.mock('@/hooks/useFriends', () => ({
 }))
 
 const mockSetReady = vi.fn()
+const mockUpdateVisibility = vi.fn()
 const mockLaunch = vi.fn()
 const mockLeave = vi.fn()
 const mockKick = vi.fn()
 const mockInvite = vi.fn()
+const mockRefetch = vi.fn()
 
 vi.mock('@/hooks/useLobby', () => ({
-  useRoom: vi.fn(() => ({ data: mockRoom, isLoading: false, error: null })),
+  useRoom: vi.fn(() => ({ data: mockRoom, isLoading: false, error: null, refetch: mockRefetch })),
   useOutgoingInvites: vi.fn(() => ({ data: [] })),
   useLobby: () => ({
     games: [],
@@ -88,6 +91,7 @@ vi.mock('@/hooks/useLobby', () => ({
     isCreatingRoom: false,
     createRoom: vi.fn(),
     setReady: mockSetReady,
+    updateRoomVisibility: mockUpdateVisibility,
     launchGame: mockLaunch,
     leaveRoom: mockLeave,
     kickPlayer: mockKick,
@@ -194,5 +198,28 @@ describe('GameRoomPage', () => {
     renderPage()
     // Skeleton should be visible (no heading)
     expect(screen.queryByText('Blackjack')).not.toBeInTheDocument()
+  })
+
+  it('allows host to toggle room visibility and open game rules modal', async () => {
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: /salle privée/i }))
+    expect(mockUpdateVisibility).toHaveBeenCalledWith(ROOM_ID, false)
+
+    fireEvent.click(screen.getByRole('button', { name: /^règles$/i }))
+    expect(await screen.findByTestId('game-rules-modal')).toBeInTheDocument()
+  })
+
+  it('resyncs room state immediately on mobile visibilitychange wake', async () => {
+    renderPage()
+    await screen.findByText('Blackjack')
+    mockRefetch.mockClear()
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'visible',
+    })
+    document.dispatchEvent(new Event('visibilitychange'))
+
+    expect(mockRefetch).toHaveBeenCalled()
   })
 })

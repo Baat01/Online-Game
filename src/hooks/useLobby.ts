@@ -9,17 +9,24 @@ import {
   declineInvite,
   getGames,
   getInvites,
+  getMyActiveRooms,
   getOutgoingInvites,
-  getRoom,
+  getPublicRooms,
+  getRoomWithPlayers,
   inviteFriend,
   joinRoom,
   kickPlayer,
   launchGame,
   leaveRoom,
   setReady,
+  updateRoomVisibility,
 } from '@/services/lobby/lobbyService'
-import { subscribeToInvitations, subscribeToRoom } from '@/services/lobby/lobbyRealtime'
-import type { GameInvitation, GameRoom } from '@/types/lobby'
+import {
+  subscribeToInvitations,
+  subscribeToPublicRooms,
+  subscribeToRoom,
+} from '@/services/lobby/lobbyRealtime'
+import type { GameInvitation, GameRoom, RoomPlayerChangeEvent } from '@/types/lobby'
 
 // ─────────────────────────────────────────────
 // Query key factory
@@ -29,64 +36,176 @@ export const lobbyKeys = {
   all: ['lobby'] as const,
   games: () => [...lobbyKeys.all, 'games'] as const,
   room: (roomId: string) => [...lobbyKeys.all, 'room', roomId] as const,
+  publicRooms: () => [...lobbyKeys.all, 'public-rooms'] as const,
+  myActiveRooms: (userId: string) => [...lobbyKeys.all, 'my-active-rooms', userId] as const,
   invites: (userId: string) => [...lobbyKeys.all, 'invites', userId] as const,
   outgoingInvites: (roomId: string) => [...lobbyKeys.all, 'outgoing-invites', roomId] as const,
+}
+
+function recomputeLobbyRoomState(room: GameRoom): GameRoom {
+  if (room.state !== 'waiting' && room.state !== 'ready') return room
+  const total = room.players.length
+  const allReady = total >= 2 && room.players.every((p) => p.ready)
+  const nextState: GameRoom['state'] = allReady ? 'ready' : 'waiting'
+  if (room.state === nextState) return room
+  return { ...room, state: nextState }
 }
 
 // ─────────────────────────────────────────────
 // Games catalog
 // ─────────────────────────────────────────────
 
-/**
- * Fetches all enabled games from the catalog.
- */
 export function useGames() {
   return useQuery({
     queryKey: lobbyKeys.games(),
     queryFn: getGames,
-    staleTime: 1000 * 60 * 10, // 10 minutes — catalog rarely changes
+    staleTime: 1000 * 60 * 10,
   })
 }
 
 // ─────────────────────────────────────────────
-// Room
+// Room (realtime + mobile wake sync)
 // ─────────────────────────────────────────────
 
-/**
- * Fetches a room with players and subscribes to realtime updates.
- * Triggers a full refetch on room_players changes (insert/update/delete).
- * Applies room row updates directly to the cache without refetch.
- */
 export function useRoom(roomId: string) {
   const queryClient = useQueryClient()
   const key = lobbyKeys.room(roomId)
 
   const query = useQuery({
     queryKey: key,
-    queryFn: () => getRoom(roomId),
+    queryFn: () => getRoomWithPlayers(roomId),
     enabled: Boolean(roomId),
-    staleTime: 0, // always fresh — realtime keeps it up to date
+    staleTime: 0,
   })
 
-  // Subscribe to realtime changes
   useEffect(() => {
     if (!roomId) return
 
-    return subscribeToRoom(roomId, {
+    const syncNow = () => {
+      void queryClient.invalidateQueries({ queryKey: key })
+      void queryClient.invalidateQueries({ queryKey: lobbyKeys.outgoingInvites(roomId) })
+    }
+
+    const unsubscribe = subscribeToRoom(roomId, {
       onRoomChange: (partial) => {
-        queryClient.setQueryData<GameRoom>(key, (old) =>
-          old ? { ...old, ...partial } : old,
-        )
+        queryClient.setQueryData<GameRoom>(key, (old) => (old ? { ...old, ...partial } : old))
+        if (partial.state === 'playing') {
+          syncNow()
+        }
       },
-      onPlayersChange: () => {
-        void queryClient.invalidateQueries({ queryKey: key })
-        void queryClient.invalidateQueries({ queryKey: lobbyKeys.outgoingInvites(roomId) })
+      onPlayersChange: (change?: RoomPlayerChangeEvent) => {
+        // Immediately patch ready/removal in React state for zero-delay UI feedback
+        if (change?.eventType === 'UPDATE' && change.userId && typeof change.ready === 'boolean') {
+          queryClient.setQueryData<GameRoom>(key, (old) => {
+            if (!old) return old
+            const nextPlayers = old.players.map((p) =>
+              p.userId === change.userId ? { ...p, ready: change.ready! } : p,
+            )
+            return recomputeLobbyRoomState({ ...old, players: nextPlayers })
+          })
+        } else if (change?.eventType === 'DELETE' && change.userId) {
+          queryClient.setQueryData<GameRoom>(key, (old) => {
+            if (!old) return old
+            const nextPlayers = old.players.filter((p) => p.userId !== change.userId)
+            return recomputeLobbyRoomState({ ...old, players: nextPlayers })
+          })
+        }
+        // Always refetch full room + players profiles (avatar, clan, Yen, themes)
+        syncNow()
+      },
+      onGameStarted: () => {
+        queryClient.setQueryData<GameRoom>(key, (old) =>
+          old ? { ...old, state: 'playing' } : old,
+        )
+        syncNow()
+      },
+      onChannelSubscribed: () => {
+        syncNow()
       },
     })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    const onWake = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      syncNow()
+    }
+    window.addEventListener('focus', onWake)
+    window.addEventListener('online', onWake)
+    document.addEventListener('visibilitychange', onWake)
+
+    return () => {
+      unsubscribe()
+      window.removeEventListener('focus', onWake)
+      window.removeEventListener('online', onWake)
+      document.removeEventListener('visibilitychange', onWake)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, queryClient])
 
   return query
+}
+
+// ─────────────────────────────────────────────
+// Public Rooms & My Active Rooms
+// ─────────────────────────────────────────────
+
+export function usePublicRooms(enabled = true) {
+  const { user } = useAuth()
+  const queryClient = useQueryClient()
+  const active = Boolean(user) && enabled
+
+  const publicQuery = useQuery({
+    queryKey: lobbyKeys.publicRooms(),
+    queryFn: getPublicRooms,
+    enabled: active,
+    staleTime: 0,
+    refetchInterval: () =>
+      typeof document !== 'undefined' && document.visibilityState === 'hidden' ? false : 4000,
+  })
+
+  const myActiveQuery = useQuery({
+    queryKey: lobbyKeys.myActiveRooms(user?.id ?? ''),
+    queryFn: getMyActiveRooms,
+    enabled: active,
+    staleTime: 0,
+    refetchInterval: () =>
+      typeof document !== 'undefined' && document.visibilityState === 'hidden' ? false : 4000,
+  })
+
+  useEffect(() => {
+    if (!active || !user) return
+
+    const syncRooms = () => {
+      void queryClient.invalidateQueries({ queryKey: lobbyKeys.publicRooms() })
+      void queryClient.invalidateQueries({ queryKey: lobbyKeys.myActiveRooms(user.id) })
+    }
+
+    const unsubscribe = subscribeToPublicRooms(syncRooms)
+
+    const onWake = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      syncRooms()
+    }
+    window.addEventListener('focus', onWake)
+    window.addEventListener('online', onWake)
+    document.addEventListener('visibilitychange', onWake)
+
+    return () => {
+      unsubscribe()
+      window.removeEventListener('focus', onWake)
+      window.removeEventListener('online', onWake)
+      document.removeEventListener('visibilitychange', onWake)
+    }
+  }, [active, user, queryClient])
+
+  return {
+    publicRooms: publicQuery.data ?? [],
+    myActiveRooms: myActiveQuery.data ?? [],
+    isLoading: publicQuery.isLoading || myActiveQuery.isLoading,
+    refetch: () => {
+      void publicQuery.refetch()
+      void myActiveQuery.refetch()
+    },
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -106,10 +225,6 @@ export function useOutgoingInvites(roomId: string) {
 // Incoming invitations
 // ─────────────────────────────────────────────
 
-/**
- * Fetches pending invitations for the current user and subscribes to new ones.
- * New invitations arrive via realtime and are prepended to the cache.
- */
 export function useInvites() {
   const { user } = useAuth()
   const queryClient = useQueryClient()
@@ -119,24 +234,37 @@ export function useInvites() {
     queryKey: key,
     queryFn: getInvites,
     enabled: Boolean(user),
-    staleTime: 1000 * 60,
+    staleTime: 1000 * 30,
   })
 
   useEffect(() => {
     if (!user) return
 
-    return subscribeToInvitations((invite) => {
-      // Only handle invites addressed to the current user
+    const unsubscribe = subscribeToInvitations((invite) => {
       if (invite.receiverId !== user.id) return
 
       queryClient.setQueryData<GameInvitation[]>(key, (old = []) => {
-        // Avoid duplicates
         if (old.some((i) => i.id === invite.id)) return old
         return [invite, ...old]
       })
       void queryClient.invalidateQueries({ queryKey: key })
     })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    const onWake = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      void queryClient.invalidateQueries({ queryKey: key })
+    }
+    window.addEventListener('focus', onWake)
+    window.addEventListener('online', onWake)
+    document.addEventListener('visibilitychange', onWake)
+
+    return () => {
+      unsubscribe()
+      window.removeEventListener('focus', onWake)
+      window.removeEventListener('online', onWake)
+      document.removeEventListener('visibilitychange', onWake)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, queryClient])
 
   return query
@@ -146,28 +274,37 @@ export function useInvites() {
 // Main hook — aggregates mutations and queries
 // ─────────────────────────────────────────────
 
-/**
- * useLobby — primary lobby hook.
- *
- * Exposes all lobby operations as callbacks and query results.
- * For room-specific features (realtime players, outgoing invites),
- * use useRoom() and useOutgoingInvites() directly.
- */
-export function useLobby() {
+export function useLobby(options?: { includePublicRooms?: boolean }) {
   const { user } = useAuth()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
 
-  // ── Queries ───────────────────────────────────────────────────────────────
   const { data: games = [], isLoading: isGamesLoading } = useGames()
   const { data: invites = [], isLoading: isInvitesLoading } = useInvites()
+  const {
+    publicRooms,
+    myActiveRooms,
+    isLoading: isRoomsLoading,
+    refetch: refetchRooms,
+  } = usePublicRooms(Boolean(options?.includePublicRooms))
 
   // ── Create Room ───────────────────────────────────────────────────────────
   const createRoomMutation = useMutation({
-    mutationFn: ({ gameSlug, maxPlayers }: { gameSlug: string; maxPlayers?: number }) =>
-      createRoom(gameSlug, maxPlayers),
+    mutationFn: ({
+      gameSlug,
+      maxPlayers,
+      isPublic,
+    }: {
+      gameSlug: string
+      maxPlayers?: number
+      isPublic?: boolean
+    }) => createRoom(gameSlug, maxPlayers, isPublic),
     onSuccess: (room) => {
       queryClient.setQueryData(lobbyKeys.room(room.id), room)
+      void queryClient.invalidateQueries({ queryKey: lobbyKeys.publicRooms() })
+      if (user) {
+        void queryClient.invalidateQueries({ queryKey: lobbyKeys.myActiveRooms(user.id) })
+      }
       navigate(`/room/${room.id}`)
     },
   })
@@ -177,6 +314,10 @@ export function useLobby() {
     mutationFn: (roomId: string) => joinRoom(roomId),
     onSuccess: (_, roomId) => {
       void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) })
+      void queryClient.invalidateQueries({ queryKey: lobbyKeys.publicRooms() })
+      if (user) {
+        void queryClient.invalidateQueries({ queryKey: lobbyKeys.myActiveRooms(user.id) })
+      }
     },
   })
 
@@ -185,16 +326,43 @@ export function useLobby() {
     mutationFn: (roomId: string) => leaveRoom(roomId),
     onSuccess: (_, roomId) => {
       queryClient.removeQueries({ queryKey: lobbyKeys.room(roomId) })
+      void queryClient.invalidateQueries({ queryKey: lobbyKeys.publicRooms() })
+      if (user) {
+        void queryClient.invalidateQueries({ queryKey: lobbyKeys.myActiveRooms(user.id) })
+      }
       navigate('/games')
     },
   })
 
-  // ── Set Ready ─────────────────────────────────────────────────────────────
+  // ── Set Ready (optimistic + authoritative refetch) ────────────────────────
   const setReadyMutation = useMutation({
     mutationFn: ({ roomId, ready }: { roomId: string; ready: boolean }) =>
       setReady(roomId, ready),
-    onSuccess: (_, { roomId }) => {
+    onMutate: async ({ roomId, ready }) => {
+      if (!user) return
+      const key = lobbyKeys.room(roomId)
+      queryClient.setQueryData<GameRoom>(key, (old) => {
+        if (!old) return old
+        const nextPlayers = old.players.map((p) =>
+          p.userId === user.id ? { ...p, ready } : p,
+        )
+        return recomputeLobbyRoomState({ ...old, players: nextPlayers })
+      })
+    },
+    onSettled: (_, __, { roomId }) => {
       void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) })
+    },
+  })
+
+  // ── Update Room Visibility ────────────────────────────────────────────────
+  const updateVisibilityMutation = useMutation({
+    mutationFn: ({ roomId, isPublic }: { roomId: string; isPublic: boolean }) =>
+      updateRoomVisibility(roomId, isPublic),
+    onSuccess: (_, { roomId, isPublic }) => {
+      queryClient.setQueryData<GameRoom>(lobbyKeys.room(roomId), (old) =>
+        old ? { ...old, isPublic } : old,
+      )
+      void queryClient.invalidateQueries({ queryKey: lobbyKeys.publicRooms() })
     },
   })
 
@@ -202,7 +370,11 @@ export function useLobby() {
   const launchGameMutation = useMutation({
     mutationFn: (roomId: string) => launchGame(roomId),
     onSuccess: (_, roomId) => {
+      queryClient.setQueryData<GameRoom>(lobbyKeys.room(roomId), (old) =>
+        old ? { ...old, state: 'playing' } : old,
+      )
       void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) })
+      void queryClient.invalidateQueries({ queryKey: lobbyKeys.publicRooms() })
     },
   })
 
@@ -235,13 +407,16 @@ export function useLobby() {
   const acceptInviteMutation = useMutation({
     mutationFn: (inviteId: string) => acceptInvite(inviteId),
     onSuccess: (roomId, inviteId) => {
-      // Remove from incoming invites cache
       if (user) {
         queryClient.setQueryData<GameInvitation[]>(lobbyKeys.invites(user.id), (old = []) =>
           old.filter((i) => i.id !== inviteId),
         )
+        void queryClient.invalidateQueries({ queryKey: lobbyKeys.myActiveRooms(user.id) })
       }
-      if (roomId) navigate(`/room/${roomId}`)
+      if (roomId) {
+        void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) })
+        navigate(`/room/${roomId}`)
+      }
     },
   })
 
@@ -268,8 +443,8 @@ export function useLobby() {
 
   // ── Stable callbacks ──────────────────────────────────────────────────────
   const handleCreateRoom = useCallback(
-    (gameSlug: string, maxPlayers?: number) =>
-      createRoomMutation.mutateAsync({ gameSlug, maxPlayers }),
+    (gameSlug: string, maxPlayers?: number, isPublic?: boolean) =>
+      createRoomMutation.mutateAsync({ gameSlug, maxPlayers, isPublic }),
     [createRoomMutation],
   )
   const handleJoinRoom = useCallback(
@@ -283,6 +458,11 @@ export function useLobby() {
   const handleSetReady = useCallback(
     (roomId: string, ready: boolean) => setReadyMutation.mutateAsync({ roomId, ready }),
     [setReadyMutation],
+  )
+  const handleUpdateVisibility = useCallback(
+    (roomId: string, isPublic: boolean) =>
+      updateVisibilityMutation.mutateAsync({ roomId, isPublic }),
+    [updateVisibilityMutation],
   )
   const handleLaunchGame = useCallback(
     (roomId: string) => launchGameMutation.mutateAsync(roomId),
@@ -311,22 +491,24 @@ export function useLobby() {
   )
 
   return {
-    // Queries
     games,
     invites,
+    publicRooms,
+    myActiveRooms,
     isGamesLoading,
     isInvitesLoading,
+    isRoomsLoading,
+    refetchRooms,
 
-    // Room mutations
     createRoom: handleCreateRoom,
     isCreatingRoom: createRoomMutation.isPending,
     joinRoom: handleJoinRoom,
     leaveRoom: handleLeaveRoom,
     setReady: handleSetReady,
+    updateRoomVisibility: handleUpdateVisibility,
     launchGame: handleLaunchGame,
     kickPlayer: handleKick,
 
-    // Invitation mutations
     invite: handleInvite,
     accept: handleAccept,
     decline: handleDecline,

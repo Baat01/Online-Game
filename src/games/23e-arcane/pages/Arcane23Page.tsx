@@ -194,6 +194,7 @@ export function Arcane23Page() {
           isHost={isHost}
           isUpdating={isUpdating}
           playerProfiles={playerProfiles}
+          playerThemes={playerThemes}
           themes={selfThemes}
           onSubmitChoice={(c) => void handleChoice(c)}
           onResolvePrompt={(p, r) => void handleResolvePrompt(p, r)}

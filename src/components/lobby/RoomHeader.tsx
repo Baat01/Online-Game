@@ -1,4 +1,4 @@
-import { Check, Copy, Spade, Users } from 'lucide-react'
+import { Check, Copy, Globe, Lock, Spade, Users } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useState } from 'react'
 import { Button } from '@/components/ui/Button'
@@ -51,10 +51,32 @@ export function RoomHeader({ room }: RoomHeaderProps) {
           </div>
         </div>
 
-        {/* State badge */}
-        <span className={clsx('px-3 py-1 rounded-full text-xs font-semibold', stateClass)}>
-          {label}
-        </span>
+        {/* State + visibility badges */}
+        <div className="flex items-center gap-2">
+          <span
+            className={clsx(
+              'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border',
+              (room.isPublic ?? true)
+                ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
+                : 'bg-surface-700 border-surface-600 text-slate-300',
+            )}
+          >
+            {(room.isPublic ?? true) ? (
+              <>
+                <Globe className="size-3" aria-hidden="true" />
+                Publique
+              </>
+            ) : (
+              <>
+                <Lock className="size-3" aria-hidden="true" />
+                Privée
+              </>
+            )}
+          </span>
+          <span className={clsx('px-3 py-1 rounded-full text-xs font-semibold', stateClass)}>
+            {label}
+          </span>
+        </div>
       </div>
 
       {/* Bottom row */}

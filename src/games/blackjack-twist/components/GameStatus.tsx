@@ -1,6 +1,6 @@
 import { Sparkles, ArrowLeft, Layers } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
-import { CardThemeSelector } from '../../_shared/components'
+import { CardThemeSelector, GameRulesButton } from '../../_shared/components'
 import type { TwistState } from '../engine/twistEngine'
 
 interface GameStatusProps {
@@ -43,6 +43,7 @@ export function GameStatus({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
+        <GameRulesButton gameSlug="blackjack-twist" />
         <CardThemeSelector compact />
         <Button
           size="sm"

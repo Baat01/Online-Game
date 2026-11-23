@@ -65,6 +65,7 @@ export interface GameRoom {
   hostId: string
   state: RoomState
   maxPlayers: number
+  isPublic: boolean
   createdAt: string
   startedAt: string | null
   metadata?: Record<string, unknown>
@@ -95,9 +96,17 @@ export interface GameInvitation {
 // Realtime callback shapes
 // ─────────────────────────────────────────────
 
+export interface RoomPlayerChangeEvent {
+  eventType: 'INSERT' | 'UPDATE' | 'DELETE'
+  userId?: string
+  ready?: boolean
+}
+
 export interface RoomCallbacks {
   onRoomChange: (partial: Partial<GameRoom>) => void
-  onPlayersChange: () => void
+  onPlayersChange: (change?: RoomPlayerChangeEvent) => void
+  onGameStarted?: () => void
+  onChannelSubscribed?: () => void
 }
 
 export type InvitationCallback = (invite: GameInvitation) => void

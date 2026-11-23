@@ -465,6 +465,7 @@ export type Database = {
           game_slug: string
           host_id: string
           id: string
+          is_public: boolean
           max_players: number
           metadata: Json
           started_at: string | null
@@ -475,6 +476,7 @@ export type Database = {
           game_slug: string
           host_id: string
           id?: string
+          is_public?: boolean
           max_players?: number
           metadata?: Json
           started_at?: string | null
@@ -485,6 +487,7 @@ export type Database = {
           game_slug?: string
           host_id?: string
           id?: string
+          is_public?: boolean
           max_players?: number
           metadata?: Json
           started_at?: string | null

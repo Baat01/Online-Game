@@ -4,40 +4,61 @@ import type { GameCatalogEntry, GameInvitation, GameRoom, RoomPlayer } from '@/t
 import { createRoomSchema, inviteFriendSchema } from './lobbySchemas'
 
 /**
- * Lobby Service — Phase 3.
+ * Lobby Service.
  *
  * All interactions with game_catalog, game_rooms, room_players, and game_invitations.
  * No React, no hooks, no UI logic.
- *
- * Architecture:
- *  - Every function returns typed domain objects (not raw Supabase rows)
- *  - Throws on error — callers (hooks) handle error state
- *  - Zod validation on all inputs before hitting the DB
  */
+
+const ROOM_PLAYER_SELECT = `
+  room_id,
+  user_id,
+  joined_at,
+  ready,
+  profiles!inner (
+    id,
+    username,
+    display_name,
+    avatar_url,
+    yen_balance,
+    is_admin,
+    permissions,
+    clan_title,
+    card_back_theme,
+    card_front_theme,
+    dice_theme,
+    coin_theme,
+    unlocked_themes
+  )
+`
+
+const GAME_ROOM_SELECT =
+  'id, game_slug, host_id, state, max_players, is_public, created_at, started_at, metadata'
 
 // ─────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────
 
-function toGameRoom(
-  row: {
-    id: string
-    game_slug: string
-    host_id: string
-    state: string
-    max_players: number
-    created_at: string
-    started_at: string | null
-    metadata?: unknown
-  },
-  players: RoomPlayer[] = [],
-): GameRoom {
+interface RawRoomRow {
+  id: string
+  game_slug: string
+  host_id: string
+  state: string
+  max_players: number
+  is_public?: boolean
+  created_at: string
+  started_at: string | null
+  metadata?: unknown
+}
+
+function toGameRoom(row: RawRoomRow, players: RoomPlayer[] = []): GameRoom {
   return {
     id: row.id,
     gameSlug: row.game_slug,
     hostId: row.host_id,
     state: row.state as GameRoom['state'],
     maxPlayers: row.max_players,
+    isPublic: row.is_public ?? true,
     createdAt: row.created_at,
     startedAt: row.started_at,
     ...(row.metadata !== undefined ? { metadata: row.metadata as Record<string, unknown> } : {}),
@@ -94,6 +115,7 @@ function toInvitation(row: {
     username: string
     display_name: string | null
     avatar_url: string | null
+    clan_title?: string | null
   } | null
   receiver_profile?: {
     id: string
@@ -114,6 +136,28 @@ function toInvitation(row: {
     ...(row.sender_profile ? { sender: row.sender_profile } : {}),
     ...(row.receiver_profile ? { receiver: row.receiver_profile } : {}),
   }
+}
+
+async function attachPlayersToRooms(roomRows: RawRoomRow[]): Promise<GameRoom[]> {
+  if (roomRows.length === 0) return []
+  const roomIds = roomRows.map((r) => r.id)
+  const { data: playersData, error: playersError } = await supabase
+    .from('room_players')
+    .select(ROOM_PLAYER_SELECT)
+    .in('room_id', roomIds)
+    .order('joined_at')
+
+  if (playersError) throw playersError
+
+  const byRoom = new Map<string, RoomPlayer[]>()
+  for (const row of playersData ?? []) {
+    const mapped = toRoomPlayer(row as Parameters<typeof toRoomPlayer>[0])
+    const list = byRoom.get(mapped.roomId) ?? []
+    list.push(mapped)
+    byRoom.set(mapped.roomId, list)
+  }
+
+  return roomRows.map((r) => toGameRoom(r, byRoom.get(r.id) ?? []))
 }
 
 // ─────────────────────────────────────────────
@@ -150,16 +194,27 @@ export async function getGames(): Promise<GameCatalogEntry[]> {
 /**
  * Create a new game room. The DB trigger auto-seats the host.
  */
-export async function createRoom(gameSlug: string, maxPlayers = 6): Promise<GameRoom> {
-  const parsed = createRoomSchema.parse({ gameSlug, maxPlayers })
+export async function createRoom(
+  gameSlug: string,
+  maxPlayers = 6,
+  isPublic = true,
+): Promise<GameRoom> {
+  const parsed = createRoomSchema.parse({ gameSlug, maxPlayers, isPublic })
 
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
 
   const { data, error } = await supabase
     .from('game_rooms')
-    .insert({ game_slug: parsed.gameSlug, host_id: user.id, max_players: parsed.maxPlayers })
-    .select('id, game_slug, host_id, state, max_players, created_at, started_at')
+    .insert({
+      game_slug: parsed.gameSlug,
+      host_id: user.id,
+      max_players: parsed.maxPlayers,
+      is_public: parsed.isPublic,
+    })
+    .select('id, game_slug, host_id, state, max_players, is_public, created_at, started_at')
     .single()
 
   if (error) throw error
@@ -167,12 +222,12 @@ export async function createRoom(gameSlug: string, maxPlayers = 6): Promise<Game
 }
 
 /**
- * Fetch a room with all its players and their profiles.
+ * Fetch a room with all its players and their full profiles.
  */
 export async function getRoom(roomId: string): Promise<GameRoom> {
   const { data: roomData, error: roomError } = await supabase
     .from('game_rooms')
-    .select('id, game_slug, host_id, state, max_players, created_at, started_at, metadata')
+    .select(GAME_ROOM_SELECT)
     .eq('id', roomId)
     .single()
 
@@ -180,27 +235,7 @@ export async function getRoom(roomId: string): Promise<GameRoom> {
 
   const { data: playersData, error: playersError } = await supabase
     .from('room_players')
-    .select(`
-      room_id,
-      user_id,
-      joined_at,
-      ready,
-      profiles!inner (
-        id,
-        username,
-        display_name,
-        avatar_url,
-        yen_balance,
-        is_admin,
-        permissions,
-        clan_title,
-        card_back_theme,
-        card_front_theme,
-        dice_theme,
-        coin_theme,
-        unlocked_themes
-      )
-    `)
+    .select(ROOM_PLAYER_SELECT)
     .eq('room_id', roomId)
     .order('joined_at')
 
@@ -210,21 +245,99 @@ export async function getRoom(roomId: string): Promise<GameRoom> {
     toRoomPlayer(p as Parameters<typeof toRoomPlayer>[0]),
   )
 
-  return toGameRoom(roomData, players)
+  return toGameRoom(roomData as RawRoomRow, players)
+}
+
+/** Alias kept for clarity across lobby consumers */
+export const getRoomWithPlayers = getRoom
+
+/**
+ * Fetch public rooms currently waiting, ready, or playing.
+ */
+export async function getPublicRooms(): Promise<GameRoom[]> {
+  const { data, error } = await supabase
+    .from('game_rooms')
+    .select(GAME_ROOM_SELECT)
+    .eq('is_public', true)
+    .in('state', ['waiting', 'ready', 'playing'])
+    .order('created_at', { ascending: false })
+    .limit(30)
+
+  if (error) throw error
+  return attachPlayersToRooms((data ?? []) as RawRoomRow[])
+}
+
+/**
+ * Fetch active rooms (waiting, ready, or playing) where the current user is seated.
+ * Essential for mobile reconnects and resuming ongoing matches from the lobby.
+ */
+export async function getMyActiveRooms(): Promise<GameRoom[]> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return []
+
+  const { data: seatRows, error: seatErr } = await supabase
+    .from('room_players')
+    .select('room_id')
+    .eq('user_id', user.id)
+
+  if (seatErr) throw seatErr
+
+  const roomIds = Array.from(new Set((seatRows ?? []).map((r) => r.room_id)))
+  if (roomIds.length === 0) return []
+
+  const { data: roomRows, error: roomsErr } = await supabase
+    .from('game_rooms')
+    .select(GAME_ROOM_SELECT)
+    .in('id', roomIds)
+    .in('state', ['waiting', 'ready', 'playing'])
+    .order('created_at', { ascending: false })
+
+  if (roomsErr) throw roomsErr
+
+  const rooms = await attachPlayersToRooms((roomRows ?? []) as RawRoomRow[])
+  // Prioritize rooms currently in progress at the top
+  return rooms.sort((a, b) => {
+    if (a.state === 'playing' && b.state !== 'playing') return -1
+    if (b.state === 'playing' && a.state !== 'playing') return 1
+    return b.createdAt.localeCompare(a.createdAt)
+  })
+}
+
+/**
+ * Toggle room visibility between Public and Private (host-only).
+ */
+export async function updateRoomVisibility(roomId: string, isPublic: boolean): Promise<void> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+
+  const { error } = await supabase
+    .from('game_rooms')
+    .update({ is_public: isPublic })
+    .eq('id', roomId)
+    .eq('host_id', user.id)
+
+  if (error) throw error
 }
 
 /**
  * Join an existing room (insert the current user into room_players).
+ * Idempotent if the user is already seated (code 23505).
  */
 export async function joinRoom(roomId: string): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
 
   const { error } = await supabase
     .from('room_players')
     .insert({ room_id: roomId, user_id: user.id, ready: false })
 
-  if (error) throw error
+  if (error && error.code !== '23505') throw error
 }
 
 /**
@@ -232,10 +345,11 @@ export async function joinRoom(roomId: string): Promise<void> {
  * If the current user is the host and other players remain, the room is cancelled.
  */
 export async function leaveRoom(roomId: string): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
 
-  // Check if user is host
   const { data: room } = await supabase
     .from('game_rooms')
     .select('host_id')
@@ -243,7 +357,6 @@ export async function leaveRoom(roomId: string): Promise<void> {
     .single()
 
   if (room?.host_id === user.id) {
-    // Host is leaving — cancel the room
     await supabase.from('game_rooms').update({ state: 'cancelled' }).eq('id', roomId)
   }
 
@@ -260,7 +373,9 @@ export async function leaveRoom(roomId: string): Promise<void> {
  * Toggle the current user's ready state in a room.
  */
 export async function setReady(roomId: string, ready: boolean): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
 
   const { error } = await supabase
@@ -274,10 +389,12 @@ export async function setReady(roomId: string, ready: boolean): Promise<void> {
 
 /**
  * Launch the game. Host-only. Requires room state to be 'ready'.
- * Sets state to 'playing'.
+ * Sets state to 'playing', stamps started_at, and emits a game_started event.
  */
 export async function launchGame(roomId: string): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
 
   const { data: room, error: fetchError } = await supabase
@@ -290,19 +407,34 @@ export async function launchGame(roomId: string): Promise<void> {
   if (room.host_id !== user.id) throw new Error('Only the host can launch the game')
   if (room.state !== 'ready') throw new Error('All players must be ready before launching')
 
+  const startedAt = new Date().toISOString()
   const { error } = await supabase
     .from('game_rooms')
-    .update({ state: 'playing' })
+    .update({ state: 'playing', started_at: startedAt })
     .eq('id', roomId)
 
   if (error) throw error
+
+  // Emit a game_started realtime event as a redundant instant launch signal
+  try {
+    await supabase.from('game_events').insert({
+      room_id: roomId,
+      user_id: user.id,
+      type: 'game_started',
+      payload: { roomId, startedAt },
+    })
+  } catch {
+    // Non-blocking: game_rooms.state = 'playing' is the authoritative signal
+  }
 }
 
 /**
  * Kick a player from the room. Host-only.
  */
 export async function kickPlayer(roomId: string, userId: string): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
 
   const { data: room } = await supabase
@@ -334,7 +466,9 @@ export async function inviteFriend(
   receiverId: string,
   gameSlug: string,
 ): Promise<GameInvitation> {
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
 
   const parsed = inviteFriendSchema.parse({ roomId, receiverId, gameSlug })
@@ -363,7 +497,9 @@ export async function inviteFriend(
  * Filters out expired invitations client-side.
  */
 export async function getInvites(): Promise<GameInvitation[]> {
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
   if (!user) return []
 
   const { data, error } = await supabase
@@ -404,7 +540,9 @@ export async function getInvites(): Promise<GameInvitation[]> {
  * Fetch outgoing invitations for a specific room.
  */
 export async function getOutgoingInvites(roomId: string): Promise<GameInvitation[]> {
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
   if (!user) return []
 
   const { data, error } = await supabase
@@ -442,10 +580,11 @@ export async function getOutgoingInvites(roomId: string): Promise<GameInvitation
  * Accept an invitation and auto-join the associated room.
  */
 export async function acceptInvite(inviteId: string): Promise<string | null> {
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
 
-  // Fetch invite to get room_id
   const { data: invite, error: fetchError } = await supabase
     .from('game_invitations')
     .select('room_id, expires_at, status')
@@ -456,7 +595,6 @@ export async function acceptInvite(inviteId: string): Promise<string | null> {
   if (invite.status !== 'pending') throw new Error('Invitation is no longer pending')
   if (new Date(invite.expires_at).getTime() < Date.now()) throw new Error('Invitation has expired')
 
-  // Mark as accepted
   const { error: updateError } = await supabase
     .from('game_invitations')
     .update({ status: 'accepted' })
@@ -464,13 +602,11 @@ export async function acceptInvite(inviteId: string): Promise<string | null> {
 
   if (updateError) throw updateError
 
-  // Join the room if one is attached
   if (invite.room_id) {
     const { error: joinError } = await supabase
       .from('room_players')
       .insert({ room_id: invite.room_id, user_id: user.id, ready: false })
 
-    // Ignore "already in room" conflicts
     if (joinError && joinError.code !== '23505') throw joinError
   }
 

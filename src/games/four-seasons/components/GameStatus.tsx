@@ -1,7 +1,7 @@
 import { CloudRain, ArrowLeft } from 'lucide-react'
 import { clsx } from 'clsx'
 import { Button } from '@/components/ui/Button'
-import { CardThemeSelector } from '../../_shared/components'
+import { CardThemeSelector, GameRulesButton } from '../../_shared/components'
 import type { Suit } from '../../_shared/deck'
 import { SEASON_META, getNextSeason, type FourSeasonsState } from '../engine/fourSeasonsEngine'
 
@@ -76,6 +76,7 @@ export function GameStatus({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
+        <GameRulesButton gameSlug="four-seasons" />
         <CardThemeSelector compact />
         <Button
           size="sm"

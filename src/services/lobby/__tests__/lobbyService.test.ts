@@ -25,7 +25,7 @@ vi.mock('@/lib/supabase', () => ({
 /** Build a fluent chainable Supabase mock */
 function buildChain(result: { data: unknown; error: unknown }) {
   const chain: Record<string, unknown> = {}
-  const methods = ['select', 'insert', 'update', 'delete', 'upsert', 'eq', 'in', 'order', 'single', 'neq']
+  const methods = ['select', 'insert', 'update', 'delete', 'upsert', 'eq', 'in', 'order', 'limit', 'single', 'neq']
   methods.forEach((m) => {
     chain[m] = vi.fn(() => chain)
   })
@@ -199,6 +199,67 @@ describe('lobbyService', () => {
       }))
 
       await expect(lobbyService.launchGame(TEST_ROOM_ID)).rejects.toThrow('must be ready')
+    })
+  })
+
+  describe('updateRoomVisibility', () => {
+    it('updates is_public on game_rooms for the host', async () => {
+      const chain = buildChain({ data: null, error: null })
+      mockFrom.mockReturnValue(chain)
+
+      await lobbyService.updateRoomVisibility(TEST_ROOM_ID, false)
+
+      expect(mockFrom).toHaveBeenCalledWith('game_rooms')
+      expect(chain.update).toHaveBeenCalledWith({ is_public: false })
+    })
+  })
+
+  describe('getPublicRooms', () => {
+    it('returns public rooms with attached players', async () => {
+      mockFrom
+        .mockReturnValueOnce(
+          buildChain({
+            data: [
+              {
+                id: TEST_ROOM_ID,
+                game_slug: '23e-arcane',
+                host_id: TEST_USER_ID,
+                state: 'waiting',
+                max_players: 2,
+                is_public: true,
+                created_at: '2026-01-01T00:00:00Z',
+                started_at: null,
+                metadata: { stakeYen: 100 },
+              },
+            ],
+            error: null,
+          }),
+        )
+        .mockReturnValueOnce(
+          buildChain({
+            data: [
+              {
+                room_id: TEST_ROOM_ID,
+                user_id: TEST_USER_ID,
+                joined_at: '2026-01-01T00:00:00Z',
+                ready: false,
+                profiles: {
+                  id: TEST_USER_ID,
+                  username: 'bami',
+                  display_name: 'Bami',
+                  avatar_url: null,
+                  clan_title: 'Clan Momobami',
+                },
+              },
+            ],
+            error: null,
+          }),
+        )
+
+      const rooms = await lobbyService.getPublicRooms()
+      expect(rooms).toHaveLength(1)
+      expect(rooms[0].isPublic).toBe(true)
+      expect(rooms[0].players[0]?.profile.username).toBe('bami')
     })
   })
 })

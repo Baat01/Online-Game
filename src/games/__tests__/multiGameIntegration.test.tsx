@@ -61,6 +61,7 @@ import { ToastProvider } from '@/components/ui/Toast'
 import { GlobalInvitationPopup } from '@/components/lobby/GlobalInvitationPopup'
 import { useThemeStore } from '@/stores/themeStore'
 import { GameRoomPage } from '@/pages/GameRoomPage'
+import { GamesPage } from '@/pages/GamesPage'
 import { QuickDrawPage } from '@/pages/QuickDrawPage'
 import { SavingThrowPage } from '../saving-throw/pages/SavingThrowPage'
 import { BlackjackTwistPage } from '../blackjack-twist/pages/BlackjackTwistPage'
@@ -736,5 +737,138 @@ describe('Multi-Game UI, Realtime Room, Yen Wagering & Player-Bound Themes', () 
     expect(document.querySelector('[data-dice-type="d12"]')).toBeInTheDocument()
     expect(document.querySelector('[data-dice-type="d16"]')).toBeInTheDocument()
     expect(screen.getByAltText(/666 — Gaster/i)).toBeInTheDocument()
+  })
+
+  it('displays public waiting/playing rooms in GamesPage, lets Guest join, and opens GameRulesModal in Lobby & in-game', async () => {
+    const client = localClient.current!
+    // Host creates a public waiting room for Le 23e Arcane
+    const { data: waitingRoom } = await client
+      .from('game_rooms')
+      .insert({
+        game_slug: '23e-arcane',
+        host_id: DEMO_HOST_ID,
+        state: 'waiting',
+        max_players: 2,
+        is_public: true,
+        metadata: { stakeYen: 100 } as never,
+      })
+      .select('id')
+      .single()
+
+    const waitingId = (waitingRoom as { id: string }).id
+
+    // Guest opens GamesPage -> sees the public room and opens Rules modal
+    await client.auth.signInWithPassword({ email: 'sam@engei.local', password: 'password123' })
+    currentTestUserId = DEMO_GUEST_ID
+    const vLobby = renderGameRoute('/games', '/games', <GamesPage />)
+
+    expect(await screen.findByTestId('public-rooms-section')).toBeInTheDocument()
+    expect(await screen.findByText('Alex Rivera')).toBeInTheDocument()
+
+    // Open Rules modal from Lobby and verify 23e Arcane index appears
+    fireEvent.click(screen.getByRole('button', { name: /règles de le 23e arcane/i }))
+    expect(await screen.findByTestId('game-rules-modal')).toBeInTheDocument()
+    expect(screen.getByText(/index complet des 22 arcanes/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /fermer les règles/i }))
+
+    // Join the public room -> navigates into GameRoomPage
+    fireEvent.click(screen.getByRole('button', { name: /^rejoindre$/i }))
+    await waitFor(() => {
+      expect(screen.getByText(/players — 2 \/ 2/i)).toBeInTheDocument()
+    })
+    vLobby.unmount()
+
+    // Trigger mobile visibilitychange wake while Host is on GameRoomPage
+    await client.auth.signInWithPassword({ email: 'alex@engei.local', password: 'password123' })
+    currentTestUserId = DEMO_HOST_ID
+    const vHostRoom = renderGameRoute('/room/:roomId', `/room/${waitingId}`, <GameRoomPage />)
+    await screen.findByText('Sam Chen')
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'visible',
+    })
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(screen.getByText('Sam Chen')).toBeInTheDocument()
+    vHostRoom.unmount()
+  })
+
+  it('plays X. La Roue de la Fortune 3D coin flip (call -> launch -> AnimatedCoinFlip 3D result for both players) & opens in-game Rules', async () => {
+    const wheelState = createInitialArcane23State([DEMO_HOST_ID, DEMO_GUEST_ID], DEMO_HOST_ID)
+    wheelState.tarotDeck = [10]
+    wheelState.playersRecord[DEMO_HOST_ID].choice = 'tarot'
+    wheelState.playersRecord[DEMO_GUEST_ID].choice = 'classic'
+    wheelState.playersRecord[DEMO_HOST_ID].drawnTarot = 10
+    wheelState.playersRecord[DEMO_HOST_ID].effectiveTarot = 10
+    wheelState.playersRecord[DEMO_HOST_ID].tarotRevealed = true
+    wheelState.tarotDrawOrder = [DEMO_HOST_ID]
+    wheelState.phase = 'INTERACTION'
+    wheelState.presentationStep = 'TAROT_1'
+    wheelState.pendingPrompts = [
+      {
+        id: 'wheel-call-1',
+        type: 'WHEEL_CALL_COIN',
+        playerId: DEMO_GUEST_ID,
+        ownerId: DEMO_HOST_ID,
+      },
+    ]
+
+    const roomId = await seedRoom('23e-arcane', wheelState as unknown as Record<string, unknown>)
+
+    // Step 1: Opponent (Guest) chooses Pile or Face
+    currentTestUserId = DEMO_GUEST_ID
+    const vGuestCall = renderGameRoute(
+      '/room/:roomId/play/23e-arcane',
+      `/room/${roomId}/play/23e-arcane`,
+      <Arcane23Page />,
+    )
+
+    // Verify in-game Rules modal opens cleanly without advancing the game
+    fireEvent.click(await screen.findByRole('button', { name: /^règles$/i }))
+    expect(await screen.findByTestId('game-rules-modal')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /fermer les règles/i }))
+
+    expect(await screen.findByTestId('wheel-call-panel')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /parier face/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/lance la pièce 3d/i)).toBeInTheDocument()
+    })
+    vGuestCall.unmount()
+
+    // Step 2: Drawer (Host) clicks "Lancer la pièce" -> 3D Coin Flip result mounts with Host's coin_theme
+    currentTestUserId = DEMO_HOST_ID
+    const vHostFlip = renderGameRoute(
+      '/room/:roomId/play/23e-arcane',
+      `/room/${roomId}/play/23e-arcane`,
+      <Arcane23Page />,
+    )
+
+    expect(await screen.findByTestId('wheel-flip-panel')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /lancer la pièce/i }))
+
+    const resultPanel = await screen.findByTestId('wheel-coin-3d-result')
+    expect(resultPanel).toBeInTheDocument()
+    expect(resultPanel).toHaveTextContent(/\+2 manches/i)
+    const coinCanvas = screen.getByTestId('coin-3d-canvas')
+    expect(coinCanvas).toHaveAttribute('data-coin-theme', 'momobami-seal')
+    vHostFlip.unmount()
+
+    // Step 3: Opponent also sees the exact same 3D Coin Flip result overlay with Host's coin_theme
+    currentTestUserId = DEMO_GUEST_ID
+    const vGuestResult = renderGameRoute(
+      '/room/:roomId/play/23e-arcane',
+      `/room/${roomId}/play/23e-arcane`,
+      <Arcane23Page />,
+    )
+    expect(await screen.findByTestId('wheel-coin-3d-result')).toBeInTheDocument()
+    expect(screen.getByTestId('coin-3d-canvas')).toHaveAttribute('data-coin-theme', 'momobami-seal')
+
+    // Click to continue resolves the round
+    fireEvent.click(screen.getByTestId('click-anywhere-continue'))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /manche suivante/i })).toBeInTheDocument()
+    })
+    vGuestResult.unmount()
   })
 })

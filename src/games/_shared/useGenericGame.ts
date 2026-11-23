@@ -121,52 +121,96 @@ export function useGenericGame<T extends BaseGameState>(
     [roomId, user],
   )
 
-  // Realtime subscription for game_rooms metadata & game_events
+  // Realtime subscription for game_rooms metadata & game_events with mobile reconnect
   useEffect(() => {
     if (!roomId) return
 
-    const channel = supabase.channel(`generic_game:${roomId}`)
+    let active = true
+    let channel: ReturnType<typeof supabase.channel> | null = null
+    let isSubscribed = false
 
-    channel.on(
-      'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'game_events', filter: `room_id=eq.${roomId}` },
-      () => {
-        // Events are logged for replay & diagnostics
-      },
-    )
-
-    channel.on(
-      'postgres_changes',
-      { event: 'UPDATE', schema: 'public', table: 'game_rooms', filter: `id=eq.${roomId}` },
-      (payload) => {
-        const nextRow = payload.new as { metadata?: unknown; state?: string } | undefined
-        if (nextRow && isInitializedState<T>(nextRow.metadata)) {
-          setGameState(nextRow.metadata)
-
-          const serverChecksum = generateChecksum(nextRow.metadata)
-          const localChecksum = generateChecksum(metadataRef.current)
-          if (serverChecksum !== localChecksum) {
-            void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) })
-          }
-        }
-      },
-    )
-
-    channel.on('system', { event: '*' }, (payload: { extension?: string; status?: string }) => {
-      if (payload.extension === 'postgres_changes' && payload.status === 'ok') {
-        void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) })
-      }
-    })
-
-    const onFocus = () => {
+    const syncGameState = () => {
+      if (!active || actionLockRef.current) return
       void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) })
     }
-    window.addEventListener('focus', onFocus)
 
-    channel.subscribe()
+    const buildAndSubscribe = () => {
+      if (!active) return
+      if (channel) {
+        void supabase.removeChannel(channel)
+        channel = null
+      }
+      isSubscribed = false
+
+      channel = supabase.channel(`generic_game:${roomId}`)
+
+      channel.on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'game_events', filter: `room_id=eq.${roomId}` },
+        () => {
+          // Events are logged for replay & diagnostics
+        },
+      )
+
+      channel.on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'game_rooms', filter: `id=eq.${roomId}` },
+        (payload) => {
+          const nextRow = payload.new as { metadata?: unknown; state?: string } | undefined
+          if (nextRow && isInitializedState<T>(nextRow.metadata)) {
+            const localChecksum = generateChecksum(metadataRef.current)
+            const serverChecksum = generateChecksum(nextRow.metadata)
+            setGameState(nextRow.metadata)
+            metadataRef.current = nextRow.metadata
+
+            if (serverChecksum !== localChecksum) {
+              syncGameState()
+            }
+          }
+        },
+      )
+
+      channel.on('system', { event: '*' }, (payload: { extension?: string; status?: string }) => {
+        if (payload.extension === 'postgres_changes' && payload.status === 'ok') {
+          syncGameState()
+        }
+      })
+
+      channel.subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          isSubscribed = true
+          syncGameState()
+        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          isSubscribed = false
+        }
+      })
+    }
+
+    buildAndSubscribe()
+
+    const handleWake = () => {
+      if (!active) return
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      const chState = (channel as unknown as { state?: string } | null)?.state
+      if (!isSubscribed || (chState !== 'joined' && chState !== 'joining')) {
+        buildAndSubscribe()
+      }
+      syncGameState()
+    }
+
+    window.addEventListener('focus', handleWake)
+    window.addEventListener('online', handleWake)
+    document.addEventListener('visibilitychange', handleWake)
+
     return () => {
-      void supabase.removeChannel(channel)
-      window.removeEventListener('focus', onFocus)
+      active = false
+      if (channel) {
+        void supabase.removeChannel(channel)
+        channel = null
+      }
+      window.removeEventListener('focus', handleWake)
+      window.removeEventListener('online', handleWake)
+      document.removeEventListener('visibilitychange', handleWake)
     }
   }, [roomId, queryClient])
 

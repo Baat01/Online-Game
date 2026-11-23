@@ -180,7 +180,17 @@ describe('Le 23e Arcane Engine', () => {
     sWheel = submitDrawChoice(sWheel, P2, 'tarot', { rng: () => 0.1 })
     sWheel = advancePresentationStep(sWheel, () => 0.1)
     expect(sWheel.pendingPrompts[0]?.type).toBe('WHEEL_CALL_COIN')
+    // Step 1: Opponent (P2) calls Heads
     sWheel = resolveArcanePrompt(sWheel, P2, { type: 'WHEEL_CALL_COIN', call: 'heads' }, () => 0.1)
+    // Step 2: Drawer (P1) receives WHEEL_FLIP_COIN prompt to launch the 3D coin
+    expect(sWheel.pendingPrompts[0]?.type).toBe('WHEEL_FLIP_COIN')
+    expect(sWheel.pendingPrompts[0]?.playerId).toBe(P1)
+    sWheel = resolveArcanePrompt(sWheel, P1, { type: 'WHEEL_FLIP_COIN' }, () => 0.1)
+    expect(sWheel.pendingPrompts).toHaveLength(0)
+    expect(sWheel.pendingWheelFlip?.ownerId).toBe(P1)
+    expect(sWheel.pendingWheelFlip?.coinFlipNonce).toBeTruthy()
+    expect(sWheel.pendingWheelFlip?.result).toBe('heads')
+    expect(sWheel.pendingWheelFlip?.winnerId).toBe(P2)
     sWheel = runStepsUntilResolved(sWheel)
     expect(sWheel.playersRecord[P2].score).toBe(2)
 

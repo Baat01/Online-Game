@@ -7,6 +7,7 @@ import { z } from 'zod'
 export const createRoomSchema = z.object({
   gameSlug: z.string().min(1, 'Game slug is required'),
   maxPlayers: z.number().int().min(2).max(10).default(6),
+  isPublic: z.boolean().default(true),
 })
 
 export const inviteFriendSchema = z.object({

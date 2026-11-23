@@ -358,6 +358,13 @@ export type Arcane23Prompt =
     }
   | {
       id: string
+      type: 'WHEEL_FLIP_COIN'
+      playerId: string
+      callerId: string
+      call: 'heads' | 'tails'
+    }
+  | {
+      id: string
       type: 'STAR_PICK_NUMBER'
       playerId: string
     }
@@ -377,6 +384,7 @@ export type Arcane23PromptResponse =
   | { type: 'ERMITE_DECIDE'; decision: 'play' | 'cancel' }
   | { type: 'FORCE_SACRIFICE'; sacrifice: boolean }
   | { type: 'WHEEL_CALL_COIN'; call: 'heads' | 'tails' }
+  | { type: 'WHEEL_FLIP_COIN' }
   | { type: 'STAR_PICK_NUMBER'; number: number }
   | { type: 'EMPEROR_CHOOSE_LOCK'; mode: EmperorMode }
 
@@ -410,10 +418,12 @@ export interface Arcane23RoundOutcome {
   usedGaster: boolean
   starTriggered?: { ownerId: string; matchedNumber: number }
   wheelFlip?: {
+    ownerId: string
     callerId: string
     call: 'heads' | 'tails'
     result: 'heads' | 'tails'
     winnerId: string
+    coinFlipNonce: string
   }
 }
 
@@ -1503,12 +1513,40 @@ export function resolveArcanePrompt(
     }
 
     case 'WHEEL_CALL_COIN': {
-      const result = flipCoin(rng)
       const ownerId =
         currentPrompt.type === 'WHEEL_CALL_COIN' ? currentPrompt.ownerId : getOpponentId(s, playerId)
-      const winnerId = result === response.call ? playerId : ownerId
-      s.playersRecord[ownerId].tarotStepResolved = true
-      s.pendingWheelFlip = { callerId: playerId, call: response.call, result, winnerId }
+      s.currentTurnUserId = ownerId
+      s.pendingPrompts.unshift({
+        id: `wheel-flip-${s.roundNumber}-${ownerId}`,
+        type: 'WHEEL_FLIP_COIN',
+        playerId: ownerId,
+        callerId: playerId,
+        call: response.call,
+      })
+      s.historyLog.unshift(
+        `X. La Roue de la Fortune : ${response.call === 'heads' ? 'Face' : 'Pile'} annoncé. Le tireur peut maintenant lancer la pièce 3D !`,
+      )
+      return s
+    }
+
+    case 'WHEEL_FLIP_COIN': {
+      const callerId =
+        currentPrompt.type === 'WHEEL_FLIP_COIN'
+          ? currentPrompt.callerId
+          : getOpponentId(s, playerId)
+      const call = currentPrompt.type === 'WHEEL_FLIP_COIN' ? currentPrompt.call : 'heads'
+      const result = flipCoin(rng)
+      const winnerId = result === call ? callerId : playerId
+      const coinFlipNonce = `wheel-${s.roundNumber}-${Date.now()}-${Math.floor(rng() * 100000)}`
+      s.playersRecord[playerId].tarotStepResolved = true
+      s.pendingWheelFlip = {
+        ownerId: playerId,
+        callerId,
+        call,
+        result,
+        winnerId,
+        coinFlipNonce,
+      }
       s.historyLog.unshift(
         `X. La Roue de la Fortune (${result === 'heads' ? 'Face' : 'Pile'}) : +2 manches pour le gagnant du lancer !`,
       )
@@ -1679,6 +1717,8 @@ export function buildDefaultPromptResponse(prompt: Arcane23Prompt): Arcane23Prom
       return { type: 'FORCE_SACRIFICE', sacrifice: prompt.currentScore >= 2 }
     case 'WHEEL_CALL_COIN':
       return { type: 'WHEEL_CALL_COIN', call: 'heads' }
+    case 'WHEEL_FLIP_COIN':
+      return { type: 'WHEEL_FLIP_COIN' }
     case 'STAR_PICK_NUMBER':
       return { type: 'STAR_PICK_NUMBER', number: 7 }
     case 'EMPEROR_CHOOSE_LOCK':

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Coins,
   Layers,
@@ -39,6 +39,7 @@ interface ActionBarProps {
   isHost: boolean
   isUpdating: boolean
   playerProfiles: Record<string, PlayerProfileInfo>
+  playerThemes?: Record<string, PlayerCardThemeSelection>
   themes?: PlayerCardThemeSelection
   onSubmitChoice: (choice: DrawChoice) => void
   onResolvePrompt: (prompt: Arcane23Prompt, response: Arcane23PromptResponse) => void
@@ -54,6 +55,7 @@ export function ActionBar({
   isHost,
   isUpdating,
   playerProfiles,
+  playerThemes,
   themes,
   onSubmitChoice,
   onResolvePrompt,
@@ -65,6 +67,20 @@ export function ActionBar({
   const [bateleurPickId, setBateleurPickId] = useState<string | null>(null)
   const [starNum, setStarNum] = useState<number>(7)
   const [judgmentPreviewId, setJudgmentPreviewId] = useState<number | null>(null)
+  const [wheelFlipping, setWheelFlipping] = useState(false)
+
+  const wheelNonce = gameState.pendingWheelFlip?.coinFlipNonce
+  useEffect(() => {
+    if (!wheelNonce) {
+      setWheelFlipping(false)
+      return
+    }
+    setWheelFlipping(true)
+    const timer = window.setTimeout(() => {
+      setWheelFlipping(false)
+    }, 950)
+    return () => window.clearTimeout(timer)
+  }, [wheelNonce])
 
   const myState = currentUserId ? gameState.playersRecord[currentUserId] : undefined
   const activePrompt = gameState.pendingPrompts[0]
@@ -345,7 +361,11 @@ export function ActionBar({
               >
                 {!isPromptMine ? (
                   <p className="text-sm font-semibold text-purple-200 animate-pulse">
-                    En attente de décision de {promptActorName}…
+                    {activePrompt.type === 'WHEEL_FLIP_COIN'
+                      ? `En attente que ${promptActorName} lance la pièce 3D…`
+                      : activePrompt.type === 'WHEEL_CALL_COIN'
+                        ? `En attente du choix Pile ou Face de ${promptActorName}…`
+                        : `En attente de décision de ${promptActorName}…`}
                   </p>
                 ) : (
                   <>
@@ -640,7 +660,7 @@ export function ActionBar({
                     )}
 
                     {activePrompt.type === 'WHEEL_CALL_COIN' && (
-                      <div className="space-y-3 text-center">
+                      <div data-testid="wheel-call-panel" className="space-y-3 text-center">
                         <p className="text-sm font-bold text-gold-300">
                           Choisissez Pile ou Face pour la pièce 3D (+2 manches au vainqueur) :
                         </p>
@@ -648,8 +668,11 @@ export function ActionBar({
                           <AnimatedCoinFlip
                             choice="heads"
                             result={null}
-                            coinThemeId={themes?.coinThemeId}
-                            label="Pièce de la Roue"
+                            coinThemeId={
+                              playerThemes?.[activePrompt.ownerId]?.coinThemeId ??
+                              themes?.coinThemeId
+                            }
+                            label="Pièce de la Roue de la Fortune"
                           />
                         </div>
                         <div className="flex justify-center gap-3">
@@ -682,6 +705,42 @@ export function ActionBar({
                             Parier Pile
                           </Button>
                         </div>
+                      </div>
+                    )}
+
+                    {activePrompt.type === 'WHEEL_FLIP_COIN' && (
+                      <div data-testid="wheel-flip-panel" className="space-y-3 text-center">
+                        <p className="text-sm font-bold text-gold-300">
+                          {playerProfiles[activePrompt.callerId]?.displayName ?? 'Votre adversaire'} a choisi{' '}
+                          <span className="uppercase text-amber-200">
+                            {activePrompt.call === 'heads' ? 'Face' : 'Pile'}
+                          </span>
+                          . Lancez la pièce 3D !
+                        </p>
+                        <div className="flex justify-center">
+                          <AnimatedCoinFlip
+                            choice={activePrompt.call}
+                            result={null}
+                            coinThemeId={
+                              playerThemes?.[activePrompt.playerId]?.coinThemeId ??
+                              themes?.coinThemeId
+                            }
+                            label="Prête à être lancée"
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          disabled={isUpdating}
+                          leftIcon={<Coins className="size-4" />}
+                          onClick={() =>
+                            onResolvePrompt(activePrompt, {
+                              type: 'WHEEL_FLIP_COIN',
+                            })
+                          }
+                        >
+                          Lancer la pièce
+                        </Button>
                       </div>
                     )}
 
@@ -725,10 +784,45 @@ export function ActionBar({
                 )}
               </div>
             ) : (
-              <div className="flex items-center justify-center md:justify-end pt-1">
-                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-gold-300 animate-pulse">
-                  Cliquer n’importe où pour continuer <ArrowRight className="size-4" />
-                </span>
+              <div className="space-y-4">
+                {shownArcNum === 10 && gameState.pendingWheelFlip && (
+                  <div
+                    data-testid="wheel-coin-3d-result"
+                    className="rounded-xl bg-surface-950/90 border-2 border-gold-400/60 p-4 flex flex-col items-center gap-3 text-center shadow-lg"
+                  >
+                    <AnimatedCoinFlip
+                      choice={gameState.pendingWheelFlip.call}
+                      result={gameState.pendingWheelFlip.result}
+                      flipping={wheelFlipping}
+                      flipKey={gameState.pendingWheelFlip.coinFlipNonce}
+                      coinThemeId={
+                        playerThemes?.[gameState.pendingWheelFlip.ownerId]?.coinThemeId ??
+                        themes?.coinThemeId
+                      }
+                      label="X. La Roue de la Fortune — Lancer de pièce 3D"
+                    />
+                    <div className="space-y-1">
+                      <p className="text-sm font-extrabold text-gold-200">
+                        Résultat :{' '}
+                        <span className="uppercase text-amber-300">
+                          {gameState.pendingWheelFlip.result === 'heads' ? 'Face' : 'Pile'}
+                        </span>
+                      </p>
+                      <p className="text-xs font-bold text-emerald-300">
+                        Vainqueur du lancer :{' '}
+                        {playerProfiles[gameState.pendingWheelFlip.winnerId]?.displayName ??
+                          'Joueur'}{' '}
+                        (+2 manches)
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-center md:justify-end pt-1">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-bold text-gold-300 animate-pulse">
+                    Cliquer n’importe où pour continuer <ArrowRight className="size-4" />
+                  </span>
+                </div>
               </div>
             )}
           </div>
