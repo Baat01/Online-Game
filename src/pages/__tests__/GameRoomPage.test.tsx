@@ -76,6 +76,7 @@ const mockSetReady = vi.fn()
 const mockUpdateVisibility = vi.fn()
 const mockLaunch = vi.fn()
 const mockLeave = vi.fn()
+const mockDeleteRoom = vi.fn().mockResolvedValue(undefined)
 const mockKick = vi.fn()
 const mockInvite = vi.fn()
 const mockRefetch = vi.fn()
@@ -94,6 +95,7 @@ vi.mock('@/hooks/useLobby', () => ({
     updateRoomVisibility: mockUpdateVisibility,
     launchGame: mockLaunch,
     leaveRoom: mockLeave,
+    deleteRoom: mockDeleteRoom,
     kickPlayer: mockKick,
     invite: mockInvite,
     accept: vi.fn(),
@@ -221,5 +223,15 @@ describe('GameRoomPage', () => {
     document.dispatchEvent(new Event('visibilitychange'))
 
     expect(mockRefetch).toHaveBeenCalled()
+  })
+
+  it('allows host to delete the room with quick inline confirmation', async () => {
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: /supprimer le salon/i }))
+    fireEvent.click(screen.getByRole('button', { name: /confirmer/i }))
+
+    await waitFor(() => {
+      expect(mockDeleteRoom).toHaveBeenCalledWith(ROOM_ID)
+    })
   })
 })

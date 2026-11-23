@@ -66,6 +66,8 @@ export interface GameRoom {
   state: RoomState
   maxPlayers: number
   isPublic: boolean
+  stateVersion?: number
+  lastActivityAt?: string
   createdAt: string
   startedAt: string | null
   metadata?: Record<string, unknown>
@@ -105,6 +107,7 @@ export interface RoomPlayerChangeEvent {
 export interface RoomCallbacks {
   onRoomChange: (partial: Partial<GameRoom>) => void
   onPlayersChange: (change?: RoomPlayerChangeEvent) => void
+  onRoomDeleted?: () => void
   onGameStarted?: () => void
   onChannelSubscribed?: () => void
 }

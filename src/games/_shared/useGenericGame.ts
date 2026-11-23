@@ -1,14 +1,23 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useQueryClient, useMutation } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { supabase, isLocalDemoMode } from '@/lib/supabase'
 import { DEMO_GUEST_ID } from '@/lib/localSupabase'
 import { useRoom, lobbyKeys } from '@/hooks/useLobby'
 import { useAuth } from '@/hooks/useAuth'
+import { useOptionalToast } from '@/components/ui/Toast'
 import { generateChecksum } from '@/platform/sync/syncEngine'
-import { getRoomPot, getRoomStake, lockRoomEscrow, settleRoomPayout } from '@/services/wallet/walletService'
+import { RoomExpiredError, getRoomWithPlayers } from '@/services/lobby/lobbyService'
+import {
+  getRoomPot,
+  getRoomStake,
+  lockRoomEscrow,
+  settleRoomPayout,
+} from '@/services/wallet/walletService'
 import { getGameBySlug } from '../registry'
 import type { BaseGameState } from '@/types/game'
 import type { Json } from '@/types/database'
+import type { GameRoom } from '@/types/lobby'
 
 interface UseGenericGameOptions<T extends BaseGameState> {
   gameSlug?: string
@@ -20,6 +29,15 @@ export interface PlayerCardThemeSelection {
   backThemeId?: string
   diceThemeId?: string
   coinThemeId?: string
+}
+
+interface CommitRpcRow {
+  ok: boolean
+  conflict: boolean
+  state_version: number
+  metadata: unknown
+  state: GameRoom['state']
+  last_activity_at: string
 }
 
 function isInitializedState<T extends BaseGameState>(meta: unknown): meta is T {
@@ -37,25 +55,114 @@ export function useGenericGame<T extends BaseGameState>(
   options?: UseGenericGameOptions<T>,
 ) {
   const queryClient = useQueryClient()
-  const { data: room, isLoading } = useRoom(roomId)
+  const navigate = useNavigate()
+  const { toast } = useOptionalToast()
   const { user, refreshProfile } = useAuth()
+
+  const redirectedRef = useRef(false)
+  const handleRoomGone = useCallback(
+    (reason: 'deleted' | 'expired') => {
+      if (redirectedRef.current) return
+      redirectedRef.current = true
+      toast(
+        reason === 'expired'
+          ? 'Ce salon a expiré après 30 minutes d’inactivité.'
+          : 'Ce salon a été supprimé.',
+        'info',
+      )
+      navigate('/games', { replace: true })
+    },
+    [navigate, toast],
+  )
+
+  const {
+    data: room,
+    isLoading,
+    error: roomError,
+    isDeleted: roomDeleted,
+    refetch: refetchRoom,
+  } = useRoom(roomId, {
+    onRoomDeleted: () => handleRoomGone('deleted'),
+  })
 
   const initialFromRoom = isInitializedState<T>(room?.metadata) ? room.metadata : null
   const [gameState, setGameState] = useState<T | null>(initialFromRoom)
 
   const metadataRef = useRef<unknown>(room?.metadata)
+  const stateVersionRef = useRef<number>(room?.stateVersion ?? 0)
+  const lastActivityRef = useRef<string>(room?.lastActivityAt ?? '')
   const actionLockRef = useRef(false)
   const autoInitRef = useRef(false)
   const escrowCheckRef = useRef(false)
   const payoutCheckRef = useRef(false)
 
+  // Redirect if room expired or disappeared on fetch
   useEffect(() => {
-    if (actionLockRef.current) return
-    metadataRef.current = room?.metadata
-    if (isInitializedState<T>(room?.metadata)) {
-      setGameState(room.metadata)
+    if (!roomError) return
+    if (roomError instanceof RoomExpiredError || roomError.name === 'RoomExpiredError') {
+      handleRoomGone('expired')
+      return
     }
-  }, [room?.metadata])
+    const code = (roomError as { code?: string }).code
+    if (code === 'PGRST116') {
+      handleRoomGone('deleted')
+    }
+  }, [roomError, handleRoomGone])
+
+  // Authoritative sync from room query (highest state_version ALWAYS wins, never blocked by lock)
+  const adoptServerState = useCallback(
+    (
+      nextMeta: unknown,
+      incomingVersion: number,
+      incomingLastActivity?: string,
+      incomingRoomState?: GameRoom['state'],
+    ) => {
+      if (!isInitializedState<T>(nextMeta)) return
+
+      const currentVersion = stateVersionRef.current
+      if (incomingVersion < currentVersion) {
+        return
+      }
+
+      const incomingTs = incomingLastActivity ?? ''
+      const isNewerVersion = incomingVersion > currentVersion
+      const sameVersionNewerContent =
+        incomingVersion === currentVersion &&
+        !actionLockRef.current &&
+        (incomingTs > lastActivityRef.current ||
+          generateChecksum(nextMeta) !== generateChecksum(metadataRef.current))
+
+      if (isNewerVersion || sameVersionNewerContent || !isInitializedState<T>(metadataRef.current)) {
+        metadataRef.current = nextMeta
+        stateVersionRef.current = incomingVersion
+        if (incomingTs) lastActivityRef.current = incomingTs
+        setGameState(nextMeta)
+
+        queryClient.setQueryData<GameRoom>(lobbyKeys.room(roomId), (old) =>
+          old
+            ? {
+                ...old,
+                metadata: nextMeta as unknown as Record<string, unknown>,
+                stateVersion: incomingVersion,
+                ...(incomingTs ? { lastActivityAt: incomingTs } : {}),
+                ...(incomingRoomState ? { state: incomingRoomState } : {}),
+              }
+            : old,
+        )
+      }
+    },
+    [queryClient, roomId],
+  )
+
+  useEffect(() => {
+    if (!room) return
+    adoptServerState(
+      room.metadata,
+      room.stateVersion ?? 0,
+      room.lastActivityAt,
+      room.state,
+    )
+  }, [room, adoptServerState])
 
   const playerProfiles = useMemo(() => {
     const map: Record<
@@ -121,7 +228,7 @@ export function useGenericGame<T extends BaseGameState>(
     [roomId, user],
   )
 
-  // Realtime subscription for game_rooms metadata & game_events with mobile reconnect
+  // Realtime subscription + mobile reconnect + 2-second safety poll while match is active
   useEffect(() => {
     if (!roomId) return
 
@@ -130,8 +237,12 @@ export function useGenericGame<T extends BaseGameState>(
     let isSubscribed = false
 
     const syncGameState = () => {
-      if (!active || actionLockRef.current) return
-      void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) })
+      if (!active) return
+      if (typeof refetchRoom === 'function') {
+        void refetchRoom()
+      } else {
+        void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) })
+      }
     }
 
     const buildAndSubscribe = () => {
@@ -156,17 +267,33 @@ export function useGenericGame<T extends BaseGameState>(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'game_rooms', filter: `id=eq.${roomId}` },
         (payload) => {
-          const nextRow = payload.new as { metadata?: unknown; state?: string } | undefined
-          if (nextRow && isInitializedState<T>(nextRow.metadata)) {
-            const localChecksum = generateChecksum(metadataRef.current)
-            const serverChecksum = generateChecksum(nextRow.metadata)
-            setGameState(nextRow.metadata)
-            metadataRef.current = nextRow.metadata
+          const nextRow = payload.new as
+            | {
+                metadata?: unknown
+                state?: GameRoom['state']
+                state_version?: number
+                last_activity_at?: string
+              }
+            | undefined
+          if (!nextRow) return
+          const incomingVersion =
+            typeof nextRow.state_version === 'number'
+              ? nextRow.state_version
+              : stateVersionRef.current + 1
+          adoptServerState(
+            nextRow.metadata,
+            incomingVersion,
+            nextRow.last_activity_at,
+            nextRow.state,
+          )
+        },
+      )
 
-            if (serverChecksum !== localChecksum) {
-              syncGameState()
-            }
-          }
+      channel.on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'game_rooms', filter: `id=eq.${roomId}` },
+        () => {
+          handleRoomGone('deleted')
         },
       )
 
@@ -198,12 +325,22 @@ export function useGenericGame<T extends BaseGameState>(
       syncGameState()
     }
 
+    // 2-second safety poll while match is active and tab is visible
+    const pollInterval = window.setInterval(() => {
+      if (!active) return
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      const curMeta = metadataRef.current as { status?: string } | null
+      if (curMeta?.status === 'finished') return
+      syncGameState()
+    }, 2000)
+
     window.addEventListener('focus', handleWake)
     window.addEventListener('online', handleWake)
     document.addEventListener('visibilitychange', handleWake)
 
     return () => {
       active = false
+      window.clearInterval(pollInterval)
       if (channel) {
         void supabase.removeChannel(channel)
         channel = null
@@ -212,56 +349,137 @@ export function useGenericGame<T extends BaseGameState>(
       window.removeEventListener('online', handleWake)
       document.removeEventListener('visibilitychange', handleWake)
     }
-  }, [roomId, queryClient])
+  }, [roomId, queryClient, refetchRoom, adoptServerState, handleRoomGone])
 
-  const updateStateMutation = useMutation({
-    mutationFn: async (newState: Partial<T> & { markRoomFinished?: boolean }) => {
+  /**
+   * Atomically commits a state transition using commit_game_state RPC.
+   * On version conflict (e.g. simultaneous J1/J2 choices), reloads the authoritative
+   * server state returned by the RPC and replays the reducer cleanly so neither
+   * player's move is ever lost or silently rejected.
+   */
+  const commitWithRetry = useCallback(
+    async (
+      computeNext: (
+        latestState: T | null,
+      ) => (Partial<T> & { markRoomFinished?: boolean }) | null,
+    ): Promise<T | null> => {
       if (!roomId) throw new Error('No room id')
       if (actionLockRef.current) {
         throw new Error('Action already in progress')
       }
       actionLockRef.current = true
       try {
-        const { markRoomFinished, ...statePatch } = newState
-        const base = isInitializedState<T>(metadataRef.current)
-          ? metadataRef.current
-          : (gameState ?? {})
-        const merged = { ...base, ...statePatch } as T
+        const MAX_ATTEMPTS = 4
+        for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+          const base = isInitializedState<T>(metadataRef.current)
+            ? metadataRef.current
+            : gameState
+          const computed = computeNext(base)
+          if (!computed) return base
 
-        setGameState(merged)
-        metadataRef.current = merged
+          const { markRoomFinished, ...statePatch } = computed
+          const merged = { ...(base ?? {}), ...statePatch } as T
+          const expectedVersion = stateVersionRef.current
 
-        queryClient.setQueryData(lobbyKeys.room(roomId), (old: Record<string, unknown> | undefined) => {
-          if (!old) return old
-          return {
-            ...old,
-            metadata: merged,
-            ...(markRoomFinished ? { state: 'finished' } : {}),
+          const rpcClient = supabase as unknown as {
+            rpc?: (
+              fn: string,
+              args: Record<string, unknown>,
+            ) => Promise<{ data: unknown; error: { message?: string; code?: string } | null }>
           }
-        })
 
-        const updatePayload: { metadata: Json; state?: 'finished' } = {
-          metadata: merged as unknown as Json,
+          if (typeof rpcClient.rpc === 'function') {
+            const { data, error } = await rpcClient.rpc('commit_game_state', {
+              p_room_id: roomId,
+              p_new_metadata: merged as unknown as Json,
+              p_expected_version: expectedVersion,
+              p_mark_finished: Boolean(markRoomFinished),
+            })
+
+            if (error) {
+              if (error.message?.includes('ROOM_NOT_FOUND')) {
+                handleRoomGone('deleted')
+              }
+              void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) })
+              throw new Error(error.message || 'Impossible de sauvegarder l’action.')
+            }
+
+            const rows = (Array.isArray(data) ? data : data ? [data] : []) as CommitRpcRow[]
+            const row = rows[0]
+
+            if (!row) {
+              void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) })
+              throw new Error('Aucune ligne mise à jour en base (permission ou salon introuvable).')
+            }
+
+            if (row.conflict) {
+              // Adopt authoritative server state and retry reducer on latest state
+              adoptServerState(row.metadata, row.state_version, row.last_activity_at, row.state)
+              continue
+            }
+
+            if (row.ok) {
+              adoptServerState(row.metadata, row.state_version, row.last_activity_at, row.state)
+              return row.metadata as T
+            }
+          } else {
+            // Fallback for environments where rpc is not mocked
+            const updatePayload: { metadata: Json; state?: 'finished' } = {
+              metadata: merged as unknown as Json,
+            }
+            if (markRoomFinished) updatePayload.state = 'finished'
+
+            const { data: updatedRows, error } = await supabase
+              .from('game_rooms')
+              .update(updatePayload)
+              .eq('id', roomId)
+              .select('id, metadata, state, state_version, last_activity_at')
+
+            if (error || !updatedRows || updatedRows.length === 0) {
+              void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) })
+              throw error ?? new Error('Mise à jour refusée : aucune ligne modifiée.')
+            }
+
+            const updated = updatedRows[0] as unknown as {
+              metadata: unknown
+              state: GameRoom['state']
+              state_version?: number
+              last_activity_at?: string
+            }
+            adoptServerState(
+              updated.metadata,
+              updated.state_version ?? expectedVersion + 1,
+              updated.last_activity_at,
+              updated.state,
+            )
+            return updated.metadata as T
+          }
         }
-        if (markRoomFinished) {
-          updatePayload.state = 'finished'
-        }
 
-        const { error } = await supabase
-          .from('game_rooms')
-          .update(updatePayload)
-          .eq('id', roomId)
-
-        if (error) {
-          void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) })
-          throw error
-        }
-
-        return merged
+        // After repeated conflicts, sync fresh room from server and report clearly
+        const fresh = await getRoomWithPlayers(roomId)
+        adoptServerState(fresh.metadata, fresh.stateVersion ?? 0, fresh.lastActivityAt, fresh.state)
+        throw new Error('Conflit de synchronisation — état rechargé, veuillez réessayer.')
       } finally {
         actionLockRef.current = false
       }
     },
+    [roomId, gameState, queryClient, adoptServerState, handleRoomGone],
+  )
+
+  const updateStateMutation = useMutation({
+    mutationFn: async (newState: Partial<T> & { markRoomFinished?: boolean }) =>
+      commitWithRetry(() => newState),
+  })
+
+  const applyActionMutation = useMutation({
+    mutationFn: async (
+      reducer: (latestState: T) => (Partial<T> & { markRoomFinished?: boolean }) | null,
+    ) =>
+      commitWithRetry((latest) => {
+        if (!latest) return null
+        return reducer(latest)
+      }),
   })
 
   // Auto-initialize game state on mount if host enters an uninitialized room
@@ -320,7 +538,6 @@ export function useGenericGame<T extends BaseGameState>(
     if (!roomId || !room || !isHost || !gameState) return
     if (roomStakeYen <= 0) return
     const isFinished = gameState.status === 'finished' || gameState.status === 'result'
-    // In Saving Throw, 'result' is just an intermediate round unless status === 'finished'
     const gameEnded =
       room.gameSlug === 'saving-throw' ? gameState.status === 'finished' : isFinished
     if (!gameEnded) return
@@ -364,6 +581,8 @@ export function useGenericGame<T extends BaseGameState>(
   return {
     room,
     gameState,
+    stateVersion: stateVersionRef.current,
+    roomDeleted,
     isLoading,
     isHost,
     playerProfiles,
@@ -371,7 +590,8 @@ export function useGenericGame<T extends BaseGameState>(
     roomStakeYen,
     roomPotYen,
     updateGameState: updateStateMutation.mutateAsync,
-    isUpdating: updateStateMutation.isPending,
+    applyGameAction: applyActionMutation.mutateAsync,
+    isUpdating: updateStateMutation.isPending || applyActionMutation.isPending,
     emitEvent,
     resetMatch,
   }

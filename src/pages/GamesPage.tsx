@@ -11,6 +11,7 @@ import {
   Play,
   Radio,
   RotateCcw,
+  Trash2,
   Users,
 } from 'lucide-react'
 import { clsx } from 'clsx'
@@ -55,6 +56,7 @@ export function GamesPage() {
     isCreatingRoom,
     createRoom,
     joinRoom,
+    deleteRoom,
     accept,
     decline,
   } = useLobby({ includePublicRooms: true })
@@ -65,6 +67,8 @@ export function GamesPage() {
 
   const [creatingSlug, setCreatingSlug] = useState<string | null>(null)
   const [joiningRoomId, setJoiningRoomId] = useState<string | null>(null)
+  const [confirmDeleteRoomId, setConfirmDeleteRoomId] = useState<string | null>(null)
+  const [deletingRoomId, setDeletingRoomId] = useState<string | null>(null)
   const [pendingAccept, setPendingAccept] = useState<string | null>(null)
   const [pendingDecline, setPendingDecline] = useState<string | null>(null)
   const [createAsPublic, setCreateAsPublic] = useState(true)
@@ -72,6 +76,66 @@ export function GamesPage() {
 
   const userPerms = resolveUserPermissions(profile)
   const myBalance = profile?.yen_balance ?? DEFAULT_YEN_BALANCE
+  const isAdmin = Boolean(profile?.is_admin)
+
+  const canDeleteRoom = (room: GameRoom) => Boolean(isAdmin || room.hostId === user?.id)
+
+  const handleDeleteRoom = async (roomId: string) => {
+    if (!deleteRoom) return
+    setDeletingRoomId(roomId)
+    try {
+      await deleteRoom(roomId)
+      setConfirmDeleteRoomId(null)
+      toast('Salon supprimé.', 'info')
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Impossible de supprimer le salon.', 'error')
+    } finally {
+      setDeletingRoomId(null)
+    }
+  }
+
+  const renderDeleteControls = (room: GameRoom) => {
+    if (!canDeleteRoom(room) || !deleteRoom) return null
+    if (confirmDeleteRoomId === room.id) {
+      return (
+        <div className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-red-500/15 border border-red-500/40">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            isLoading={deletingRoomId === room.id}
+            onClick={() => void handleDeleteRoom(room.id)}
+            className="text-red-300 hover:text-white hover:bg-red-600/80 px-2 py-0.5 text-xs"
+          >
+            Confirmer
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={deletingRoomId === room.id}
+            onClick={() => setConfirmDeleteRoomId(null)}
+            className="text-slate-300 hover:text-white px-2 py-0.5 text-xs"
+          >
+            Annuler
+          </Button>
+        </div>
+      )
+    }
+    return (
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        aria-label={`Supprimer le salon ${room.id}`}
+        onClick={() => setConfirmDeleteRoomId(room.id)}
+        leftIcon={<Trash2 className="size-3.5" aria-hidden="true" />}
+        className="text-red-400 hover:text-red-200 hover:bg-red-500/15"
+      >
+        Supprimer
+      </Button>
+    )
+  }
 
   const handleCreateRoom = async (gameSlug: string) => {
     const plugin = getGameBySlug(gameSlug)
@@ -252,15 +316,18 @@ export function GamesPage() {
                     </p>
                   </div>
 
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="primary"
-                    leftIcon={<Play className="size-3.5" aria-hidden="true" />}
-                    onClick={() => navigate(target)}
-                  >
-                    Reprendre la partie en cours
-                  </Button>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="primary"
+                      leftIcon={<Play className="size-3.5" aria-hidden="true" />}
+                      onClick={() => navigate(target)}
+                    >
+                      Reprendre la partie en cours
+                    </Button>
+                    {renderDeleteControls(room)}
+                  </div>
                 </div>
               )
             })}
@@ -334,16 +401,19 @@ export function GamesPage() {
                       </div>
                     </div>
 
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={isSeated ? 'secondary' : 'primary'}
-                      isLoading={joiningRoomId === room.id}
-                      disabled={isFull && !isSeated}
-                      onClick={() => void handleJoinPublicRoom(room)}
-                    >
-                      {isSeated ? 'Entrer' : isFull ? 'Complet' : 'Rejoindre'}
-                    </Button>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={isSeated ? 'secondary' : 'primary'}
+                        isLoading={joiningRoomId === room.id}
+                        disabled={isFull && !isSeated}
+                        onClick={() => void handleJoinPublicRoom(room)}
+                      >
+                        {isSeated ? 'Entrer' : isFull ? 'Complet' : 'Rejoindre'}
+                      </Button>
+                      {renderDeleteControls(room)}
+                    </div>
                   </div>
                 )
               })}
@@ -390,36 +460,39 @@ export function GamesPage() {
                       </p>
                     </div>
 
-                    {isSeated ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="primary"
-                        onClick={() => navigate(getPlayPath(room))}
-                      >
-                        Reprendre
-                      </Button>
-                    ) : hasFreeSeat ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="primary"
-                        isLoading={joiningRoomId === room.id}
-                        onClick={() => void handleJoinPublicRoom(room)}
-                      >
-                        Rejoindre
-                      </Button>
-                    ) : (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="secondary"
-                        leftIcon={<Eye className="size-3.5" aria-hidden="true" />}
-                        onClick={() => navigate(getPlayPath(room))}
-                      >
-                        Observer
-                      </Button>
-                    )}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {isSeated ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="primary"
+                          onClick={() => navigate(getPlayPath(room))}
+                        >
+                          Reprendre
+                        </Button>
+                      ) : hasFreeSeat ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="primary"
+                          isLoading={joiningRoomId === room.id}
+                          onClick={() => void handleJoinPublicRoom(room)}
+                        >
+                          Rejoindre
+                        </Button>
+                      ) : (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          leftIcon={<Eye className="size-3.5" aria-hidden="true" />}
+                          onClick={() => navigate(getPlayPath(room))}
+                        >
+                          Observer
+                        </Button>
+                      )}
+                      {renderDeleteControls(room)}
+                    </div>
                   </div>
                 )
               })}

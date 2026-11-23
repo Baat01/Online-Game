@@ -1,4 +1,4 @@
-import { Check, Copy, Globe, Lock, Spade, Users } from 'lucide-react'
+import { Check, Copy, Globe, Lock, Spade, Trash2, Users } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useState } from 'react'
 import { Button } from '@/components/ui/Button'
@@ -7,21 +7,37 @@ import type { GameRoom } from '@/types/lobby'
 
 const STATE_LABELS: Record<GameRoom['state'], { label: string; className: string }> = {
   waiting: { label: 'Waiting', className: 'bg-surface-700 text-slate-400' },
-  ready: { label: 'Ready to Launch', className: 'bg-brand-500/20 text-brand-400 border border-brand-500/30' },
-  playing: { label: 'In Progress', className: 'bg-gold-500/20 text-gold-400 border border-gold-500/30' },
+  ready: {
+    label: 'Ready to Launch',
+    className: 'bg-brand-500/20 text-brand-400 border border-brand-500/30',
+  },
+  playing: {
+    label: 'In Progress',
+    className: 'bg-gold-500/20 text-gold-400 border border-gold-500/30',
+  },
   finished: { label: 'Finished', className: 'bg-surface-700 text-slate-500' },
   cancelled: { label: 'Cancelled', className: 'bg-red-500/15 text-red-400' },
 }
 
 interface RoomHeaderProps {
   room: GameRoom
+  canDelete?: boolean
+  isDeleting?: boolean
+  onDeleteRoom?: () => void
 }
 
 /**
- * Room header: game name + icon, state badge, player count, and share link.
+ * Room header: game name + icon, visibility/state badges, player count, share link,
+ * and host/admin quick-confirm room deletion button.
  */
-export function RoomHeader({ room }: RoomHeaderProps) {
+export function RoomHeader({
+  room,
+  canDelete = false,
+  isDeleting = false,
+  onDeleteRoom,
+}: RoomHeaderProps) {
   const [copied, setCopied] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
   const plugin = getGameBySlug(room.gameSlug)
   const Icon = plugin?.icon ?? Spade
   const gameName = plugin?.name ?? room.gameSlug
@@ -52,7 +68,7 @@ export function RoomHeader({ room }: RoomHeaderProps) {
         </div>
 
         {/* State + visibility badges */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span
             className={clsx(
               'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border',
@@ -91,21 +107,68 @@ export function RoomHeader({ room }: RoomHeaderProps) {
           </span>
         </div>
 
-        {/* Share link */}
-        <Button
-          id="copy-room-link"
-          variant="ghost"
-          size="sm"
-          onClick={handleCopy}
-          leftIcon={
-            copied
-              ? <Check className="size-3.5 text-brand-400" aria-hidden="true" />
-              : <Copy className="size-3.5" aria-hidden="true" />
-          }
-          className={clsx(copied && 'text-brand-400')}
-        >
-          {copied ? 'Copied!' : 'Copy Link'}
-        </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Share link */}
+          <Button
+            id="copy-room-link"
+            variant="ghost"
+            size="sm"
+            onClick={handleCopy}
+            leftIcon={
+              copied ? (
+                <Check className="size-3.5 text-brand-400" aria-hidden="true" />
+              ) : (
+                <Copy className="size-3.5" aria-hidden="true" />
+              )
+            }
+            className={clsx(copied && 'text-brand-400')}
+          >
+            {copied ? 'Copied!' : 'Copy Link'}
+          </Button>
+
+          {/* Delete Room button (Host or Admin) with quick inline confirmation */}
+          {canDelete && onDeleteRoom && (
+            confirmingDelete ? (
+              <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-red-500/15 border border-red-500/40">
+                <span className="text-xs font-semibold text-red-300">Supprimer ?</span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  isLoading={isDeleting}
+                  onClick={() => {
+                    onDeleteRoom()
+                  }}
+                  className="text-red-300 hover:text-white hover:bg-red-600/80 px-2 py-0.5 text-xs"
+                >
+                  Confirmer
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={isDeleting}
+                  onClick={() => setConfirmingDelete(false)}
+                  className="text-slate-300 hover:text-white px-2 py-0.5 text-xs"
+                >
+                  Annuler
+                </Button>
+              </div>
+            ) : (
+              <Button
+                id="delete-room-btn"
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setConfirmingDelete(true)}
+                leftIcon={<Trash2 className="size-3.5" aria-hidden="true" />}
+                className="text-red-400 hover:text-red-200 hover:bg-red-500/15"
+              >
+                Supprimer le salon
+              </Button>
+            )
+          )}
+        </div>
       </div>
     </div>
   )

@@ -38,7 +38,7 @@ export function Arcane23Page() {
     playerProfiles,
     playerThemes,
     roomPotYen,
-    updateGameState,
+    applyGameAction,
     emitEvent,
     isUpdating,
     resetMatch,
@@ -64,37 +64,46 @@ export function Arcane23Page() {
       const hostRec = gameState.playersRecord[user?.id ?? '']
       if (hostRec?.choice !== null) {
         timer = window.setTimeout(() => {
-          const allowTarot = canPlayerChooseTarot(gameState, DEMO_GUEST_ID)
-          const emp = gameState.activePersistentArcana.emperor[DEMO_GUEST_ID]
-          const aiChoice: DrawChoice =
-            emp?.currentTurnMode === 'force_tarot'
-              ? 'tarot'
-              : allowTarot && Math.random() < 0.35
+          void applyGameAction((latest) => {
+            const latestGuest = latest.playersRecord[DEMO_GUEST_ID]
+            if (!latestGuest || latest.presentationStep !== 'CHOOSING' || latestGuest.choice !== null) {
+              return null
+            }
+            const allowTarot = canPlayerChooseTarot(latest, DEMO_GUEST_ID)
+            const emp = latest.activePersistentArcana.emperor[DEMO_GUEST_ID]
+            const aiChoice: DrawChoice =
+              emp?.currentTurnMode === 'force_tarot'
                 ? 'tarot'
-                : 'classic'
-          const next = submitDrawChoice(gameState, DEMO_GUEST_ID, aiChoice)
-          void updateGameState({ ...next, markRoomFinished: next.status === 'finished' })
+                : allowTarot && Math.random() < 0.35
+                  ? 'tarot'
+                  : 'classic'
+            const next = submitDrawChoice(latest, DEMO_GUEST_ID, aiChoice)
+            return { ...next, markRoomFinished: next.status === 'finished' }
+          })
         }, 450)
       }
     } else if (
       gameState.phase === 'INTERACTION' &&
       gameState.pendingPrompts[0]?.playerId === DEMO_GUEST_ID
     ) {
-      const prompt = gameState.pendingPrompts[0]
       timer = window.setTimeout(() => {
-        const next = resolveArcanePrompt(
-          gameState,
-          DEMO_GUEST_ID,
-          buildDefaultPromptResponse(prompt),
-        )
-        void updateGameState({ ...next, markRoomFinished: next.status === 'finished' })
+        void applyGameAction((latest) => {
+          const prompt = latest.pendingPrompts[0]
+          if (!prompt || prompt.playerId !== DEMO_GUEST_ID) return null
+          const next = resolveArcanePrompt(
+            latest,
+            DEMO_GUEST_ID,
+            buildDefaultPromptResponse(prompt),
+          )
+          return { ...next, markRoomFinished: next.status === 'finished' }
+        })
       }, 450)
     }
 
     return () => {
       if (timer) window.clearTimeout(timer)
     }
-  }, [gameState, isHost, isUpdating, user?.id, updateGameState])
+  }, [gameState, isHost, isUpdating, user?.id, applyGameAction])
 
   if (!roomId) return null
 
@@ -110,12 +119,15 @@ export function Arcane23Page() {
 
   const handleChoice = async (choice: DrawChoice) => {
     if (!user) return
-    const nextState = submitDrawChoice(gameState, user.id, choice)
-    const finished = nextState.status === 'finished'
-    await updateGameState({ ...nextState, markRoomFinished: finished })
+    const committed = await applyGameAction((latest) => {
+      const nextState = submitDrawChoice(latest, user.id, choice)
+      return { ...nextState, markRoomFinished: nextState.status === 'finished' }
+    })
+    if (!committed) return
+    const finished = committed.status === 'finished'
     await emitEvent({
       type: finished ? 'game_finished' : 'state_updated',
-      payload: { action: 'choose', userId: user.id, choice, phase: nextState.phase },
+      payload: { action: 'choose', userId: user.id, choice, phase: committed.phase },
     })
   }
 
@@ -124,9 +136,12 @@ export function Arcane23Page() {
     response: Arcane23PromptResponse,
   ) => {
     if (!user) return
-    const nextState = resolveArcanePrompt(gameState, user.id, response)
-    const finished = nextState.status === 'finished'
-    await updateGameState({ ...nextState, markRoomFinished: finished })
+    const committed = await applyGameAction((latest) => {
+      const nextState = resolveArcanePrompt(latest, user.id, response)
+      return { ...nextState, markRoomFinished: nextState.status === 'finished' }
+    })
+    if (!committed) return
+    const finished = committed.status === 'finished'
     await emitEvent({
       type: finished ? 'game_finished' : 'state_updated',
       payload: { action: 'prompt_resolved', userId: user.id, promptType: response.type },
@@ -142,15 +157,19 @@ export function Arcane23Page() {
     ) {
       return
     }
-    const nextState = advancePresentationStep(gameState)
-    const finished = nextState.status === 'finished'
-    await updateGameState({ ...nextState, markRoomFinished: finished })
+    const committed = await applyGameAction((latest) => {
+      if (latest.pendingPrompts.length > 0) return null
+      const nextState = advancePresentationStep(latest)
+      return { ...nextState, markRoomFinished: nextState.status === 'finished' }
+    })
+    if (!committed) return
+    const finished = committed.status === 'finished'
     await emitEvent({
       type: finished ? 'game_finished' : 'turn_changed',
       payload: {
         action: 'advance_step',
-        presentationStep: nextState.presentationStep,
-        roundNumber: nextState.roundNumber,
+        presentationStep: committed.presentationStep,
+        roundNumber: committed.roundNumber,
       },
     })
   }

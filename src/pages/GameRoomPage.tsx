@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Coins, Globe, Lock, LogOut, Rocket, Shield, UserPlus } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
@@ -15,6 +15,7 @@ import { InviteModal } from '@/components/lobby/InviteModal'
 import { EmptyRoomState } from '@/components/lobby/EmptyRoomState'
 import { RoomPageSkeleton } from '@/components/lobby/LobbySkeleton'
 import { CardThemeSelector, GameRulesButton } from '@/games/_shared/components'
+import { RoomExpiredError } from '@/services/lobby/lobbyService'
 import {
   PRESET_YEN_STAKES,
   formatYen,
@@ -36,13 +37,25 @@ export function GameRoomPage() {
   const { user, profile } = useAuth()
   const { toast } = useToast()
 
+  const selfDeletedRef = useRef(false)
+  const redirectedRef = useRef(false)
+
+  const handleRoomDeletedRemote = useCallback(() => {
+    if (redirectedRef.current) return
+    redirectedRef.current = true
+    if (!selfDeletedRef.current) {
+      toast('Ce salon a été supprimé.', 'info')
+    }
+    navigate('/games', { replace: true })
+  }, [navigate, toast])
+
   // ── Room data + realtime ─────────────────────────────────────────────────
   const {
     data: room,
     isLoading: isRoomLoading,
     error: roomError,
     refetch: refetchRoom,
-  } = useRoom(roomId ?? '')
+  } = useRoom(roomId ?? '', { onRoomDeleted: handleRoomDeletedRemote })
   const { data: outgoingInvites = [] } = useOutgoingInvites(roomId ?? '')
 
   const {
@@ -51,8 +64,19 @@ export function GameRoomPage() {
     launchGame,
     kickPlayer,
     leaveRoom,
+    deleteRoom,
     invite,
   } = useLobby()
+
+  // Redirect cleanly if room expired after 30 minutes of inactivity
+  useEffect(() => {
+    if (!roomError || redirectedRef.current) return
+    if (roomError instanceof RoomExpiredError || roomError.name === 'RoomExpiredError') {
+      redirectedRef.current = true
+      toast('Ce salon a expiré après 30 minutes d’inactivité.', 'info')
+      navigate('/games', { replace: true })
+    }
+  }, [roomError, navigate, toast])
 
   // ── Presence for players ─────────────────────────────────────────────────
   const playerIds = room?.players.map((p) => p.userId) ?? []
@@ -65,6 +89,7 @@ export function GameRoomPage() {
   const [pendingVisibility, setPendingVisibility] = useState(false)
   const [pendingLaunch, setPendingLaunch] = useState(false)
   const [pendingLeave, setPendingLeave] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState(false)
   const [pendingStake, setPendingStake] = useState(false)
   const [customStakeInput, setCustomStakeInput] = useState('')
 
@@ -207,6 +232,22 @@ export function GameRoomPage() {
     }
   }
 
+  const handleDeleteRoom = async () => {
+    if (!roomId || !deleteRoom) return
+    setPendingDelete(true)
+    selfDeletedRef.current = true
+    try {
+      await deleteRoom(roomId)
+      redirectedRef.current = true
+      toast('Salon supprimé.', 'info')
+      navigate('/games', { replace: true })
+    } catch (err) {
+      selfDeletedRef.current = false
+      toast(err instanceof Error ? err.message : 'Impossible de supprimer le salon.', 'error')
+      setPendingDelete(false)
+    }
+  }
+
   const handleKick = async (userId: string) => {
     if (!roomId) return
     setPendingKick(userId)
@@ -252,7 +293,12 @@ export function GameRoomPage() {
   return (
     <div className="max-w-2xl mx-auto px-4 py-8 sm:py-12 animate-fade-in space-y-4">
       {/* Room header */}
-      <RoomHeader room={room} />
+      <RoomHeader
+        room={room}
+        canDelete={Boolean(isHost || isAdmin)}
+        isDeleting={pendingDelete}
+        onDeleteRoom={() => void handleDeleteRoom()}
+      />
 
       {/* Playing / finished states */}
       {isPlaying && (

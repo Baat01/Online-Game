@@ -31,6 +31,8 @@ function mapRoomPayload(row: Record<string, unknown>): Partial<GameRoom> {
   if (typeof row.state === 'string') partial.state = row.state as RoomState
   if (typeof row.max_players === 'number') partial.maxPlayers = row.max_players
   if (typeof row.is_public === 'boolean') partial.isPublic = row.is_public
+  if (typeof row.state_version === 'number') partial.stateVersion = row.state_version
+  if (typeof row.last_activity_at === 'string') partial.lastActivityAt = row.last_activity_at
   if (typeof row.host_id === 'string') partial.hostId = row.host_id
   if (typeof row.game_slug === 'string') partial.gameSlug = row.game_slug
   if ('started_at' in row) partial.startedAt = (row.started_at as string | null) ?? null
@@ -85,6 +87,18 @@ export function subscribeToRoom(roomId: string, callbacks: RoomCallbacks): () =>
           if (mapped.state === 'playing') {
             callbacks.onGameStarted?.()
           }
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'game_rooms',
+          filter: `id=eq.${roomId}`,
+        },
+        () => {
+          callbacks.onRoomDeleted?.()
         },
       )
       .on(

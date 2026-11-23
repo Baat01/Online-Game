@@ -8,17 +8,19 @@ import * as lobbyService from '../lobbyService'
 
 // ── Supabase mock ─────────────────────────────────────────────────────────────
 
-const { mockFrom, mockAuth } = vi.hoisted(() => ({
+const { mockFrom, mockAuth, mockRpc } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
   mockAuth: {
     getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'test-user-uuid-1111-111111111111' } } }),
   },
+  mockRpc: vi.fn().mockResolvedValue({ data: 0, error: null }),
 }))
 
 vi.mock('@/lib/supabase', () => ({
   supabase: {
     from: mockFrom,
     auth: mockAuth,
+    rpc: mockRpc,
   },
 }))
 
@@ -260,6 +262,32 @@ describe('lobbyService', () => {
       expect(rooms).toHaveLength(1)
       expect(rooms[0].isPublic).toBe(true)
       expect(rooms[0].players[0]?.profile.username).toBe('bami')
+    })
+  })
+
+  describe('deleteRoom & 30-minute expiration', () => {
+    it('deletes a room from game_rooms by id', async () => {
+      const chain = buildChain({ data: null, error: null })
+      mockFrom.mockReturnValue(chain)
+
+      await lobbyService.deleteRoom(TEST_ROOM_ID, TEST_USER_ID)
+
+      expect(mockFrom).toHaveBeenCalledWith('game_rooms')
+      expect(chain.delete).toHaveBeenCalled()
+      expect(chain.eq).toHaveBeenCalledWith('id', TEST_ROOM_ID)
+    })
+
+    it('detects rooms inactive for more than 30 minutes and calls cleanup_inactive_rooms', async () => {
+      const staleTs = new Date(Date.now() - 31 * 60 * 1000).toISOString()
+      const freshTs = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+
+      expect(lobbyService.isRoomExpired({ lastActivityAt: staleTs, state: 'waiting' })).toBe(true)
+      expect(lobbyService.isRoomExpired({ lastActivityAt: freshTs, state: 'playing' })).toBe(false)
+
+      mockRpc.mockResolvedValueOnce({ data: 2, error: null })
+      const count = await lobbyService.cleanupInactiveRooms()
+      expect(mockRpc).toHaveBeenCalledWith('cleanup_inactive_rooms')
+      expect(count).toBe(2)
     })
   })
 })

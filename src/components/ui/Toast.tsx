@@ -133,3 +133,8 @@ export function useToast(): ToastContextValue {
   if (!ctx) throw new Error('useToast must be used inside <ToastProvider>')
   return ctx
 }
+
+export function useOptionalToast(): ToastContextValue {
+  const ctx = useContext(ToastContext)
+  return ctx ?? { toast: () => {} }
+}

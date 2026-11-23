@@ -466,10 +466,12 @@ export type Database = {
           host_id: string
           id: string
           is_public: boolean
+          last_activity_at: string
           max_players: number
           metadata: Json
           started_at: string | null
           state: Database["public"]["Enums"]["room_state"]
+          state_version: number
         }
         Insert: {
           created_at?: string
@@ -477,10 +479,12 @@ export type Database = {
           host_id: string
           id?: string
           is_public?: boolean
+          last_activity_at?: string
           max_players?: number
           metadata?: Json
           started_at?: string | null
           state?: Database["public"]["Enums"]["room_state"]
+          state_version?: number
         }
         Update: {
           created_at?: string
@@ -488,10 +492,12 @@ export type Database = {
           host_id?: string
           id?: string
           is_public?: boolean
+          last_activity_at?: string
           max_players?: number
           metadata?: Json
           started_at?: string | null
           state?: Database["public"]["Enums"]["room_state"]
+          state_version?: number
         }
         Relationships: [
           {
@@ -743,7 +749,26 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      cleanup_inactive_rooms: {
+        Args: Record<PropertyKey, never>
+        Returns: number
+      }
+      commit_game_state: {
+        Args: {
+          p_expected_version?: number | null
+          p_mark_finished?: boolean
+          p_new_metadata: Json
+          p_room_id: string
+        }
+        Returns: {
+          conflict: boolean
+          last_activity_at: string
+          metadata: Json
+          ok: boolean
+          state: Database["public"]["Enums"]["room_state"]
+          state_version: number
+        }[]
+      }
     }
     Enums: {
       blackjack_action_type: "deal" | "hit" | "stand" | "reset"

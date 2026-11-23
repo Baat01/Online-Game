@@ -285,6 +285,8 @@ function loadDb(): LocalDbState {
     if (Array.isArray(parsed.tables.game_rooms)) {
       parsed.tables.game_rooms = parsed.tables.game_rooms.map((r) => ({
         is_public: true,
+        state_version: 0,
+        last_activity_at: (r.started_at as string | null) ?? (r.created_at as string | undefined) ?? nowIso(),
         ...r,
       }))
     }
@@ -561,7 +563,20 @@ function applyInsertTriggers(table: string, inserted: Row, db: LocalDbState): vo
   }
 
   if (table === 'room_players') {
+    const room = db.tables.game_rooms.find((r) => r.id === inserted.room_id)
+    if (room) {
+      room.last_activity_at = nowIso()
+      saveDb(db)
+    }
     recalculateRoomReadyState(inserted.room_id as string, db)
+  }
+
+  if (table === 'game_events') {
+    const room = db.tables.game_rooms.find((r) => r.id === inserted.room_id)
+    if (room) {
+      room.last_activity_at = nowIso()
+      saveDb(db)
+    }
   }
 }
 
@@ -589,10 +604,16 @@ function recalculateRoomReadyState(roomId: string, db: LocalDbState): void {
 
 function applyUpdateTriggers(table: string, updated: Row, previous: Row, db: LocalDbState): void {
   if (table === 'room_players') {
+    const room = db.tables.game_rooms.find((r) => r.id === updated.room_id)
+    if (room) {
+      room.last_activity_at = nowIso()
+      saveDb(db)
+    }
     recalculateRoomReadyState(updated.room_id as string, db)
   }
 
   if (table === 'game_rooms') {
+    updated.last_activity_at = nowIso()
     if (updated.state === 'playing' && previous.state !== 'playing' && !updated.started_at) {
       updated.started_at = nowIso()
     }
@@ -786,6 +807,8 @@ class LocalQueryBuilder {
           row.state = row.state ?? 'waiting'
           row.max_players = row.max_players ?? 6
           row.is_public = row.is_public ?? true
+          row.state_version = row.state_version ?? 0
+          row.last_activity_at = row.last_activity_at ?? nowIso()
           row.metadata = row.metadata ?? {}
           row.started_at = row.started_at ?? null
         }
@@ -902,10 +925,30 @@ class LocalQueryBuilder {
         }
       }
       db.tables[this.table] = remaining
+      if (this.table === 'game_rooms' && deleted.length > 0) {
+        const deletedIds = new Set(deleted.map((r) => String(r.id)))
+        db.tables.room_players = (db.tables.room_players ?? []).filter(
+          (rp) => !deletedIds.has(String(rp.room_id)),
+        )
+        db.tables.game_events = (db.tables.game_events ?? []).filter(
+          (ev) => !deletedIds.has(String(ev.room_id)),
+        )
+        db.tables.blackjack_games = (db.tables.blackjack_games ?? []).filter(
+          (bg) => !deletedIds.has(String(bg.room_id)),
+        )
+        db.tables.game_invitations = (db.tables.game_invitations ?? []).filter(
+          (inv) => !(inv.status === 'pending' && deletedIds.has(String(inv.room_id))),
+        )
+      }
       saveDb(db)
       for (const row of deleted) {
         emitDbChange({ table: this.table, eventType: 'DELETE', new: null, old: row })
         if (this.table === 'room_players') {
+          const parentRoom = db.tables.game_rooms.find((r) => r.id === row.room_id)
+          if (parentRoom) {
+            parentRoom.last_activity_at = nowIso()
+            saveDb(db)
+          }
           recalculateRoomReadyState(row.room_id as string, db)
         }
       }
@@ -1023,6 +1066,110 @@ export function createLocalSupabaseClient(): SupabaseClient<Database> {
     },
     from(table: string) {
       return new LocalQueryBuilder(table)
+    },
+    async rpc(fnName: string, params?: Record<string, unknown>) {
+      const db = loadDb()
+      if (fnName === 'cleanup_inactive_rooms') {
+        const cutoff = Date.now() - 30 * 60 * 1000
+        const rooms = db.tables.game_rooms ?? []
+        const removed: Row[] = []
+        const kept: Row[] = []
+        for (const r of rooms) {
+          const ts = Date.parse(
+            String(r.last_activity_at ?? r.started_at ?? r.created_at ?? nowIso()),
+          )
+          if (Number.isFinite(ts) && ts < cutoff) {
+            removed.push(r)
+          } else {
+            kept.push(r)
+          }
+        }
+        if (removed.length > 0) {
+          const removedIds = new Set(removed.map((r) => String(r.id)))
+          db.tables.game_rooms = kept
+          db.tables.room_players = (db.tables.room_players ?? []).filter(
+            (rp) => !removedIds.has(String(rp.room_id)),
+          )
+          db.tables.game_events = (db.tables.game_events ?? []).filter(
+            (ev) => !removedIds.has(String(ev.room_id)),
+          )
+          db.tables.game_invitations = (db.tables.game_invitations ?? []).filter(
+            (inv) => !(inv.status === 'pending' && removedIds.has(String(inv.room_id))),
+          )
+          saveDb(db)
+          for (const r of removed) {
+            emitDbChange({ table: 'game_rooms', eventType: 'DELETE', new: null, old: r })
+          }
+        }
+        return { data: removed.length, error: null }
+      }
+
+      if (fnName === 'commit_game_state') {
+        const roomId = String(params?.p_room_id ?? '')
+        const newMetadata = (params?.p_new_metadata ?? {}) as Row
+        const expectedVersion =
+          typeof params?.p_expected_version === 'number' ? params.p_expected_version : null
+        const markFinished = Boolean(params?.p_mark_finished)
+
+        const idx = (db.tables.game_rooms ?? []).findIndex((r) => r.id === roomId)
+        if (idx < 0) {
+          return { data: null, error: { message: 'ROOM_NOT_FOUND', code: 'P0001' } }
+        }
+        const room = db.tables.game_rooms[idx]
+        const currentVersion = Number(room.state_version ?? 0)
+
+        if (expectedVersion !== null && currentVersion !== expectedVersion) {
+          return {
+            data: [
+              {
+                ok: false,
+                conflict: true,
+                state_version: currentVersion,
+                metadata: room.metadata ?? {},
+                state: room.state,
+                last_activity_at: room.last_activity_at ?? nowIso(),
+              },
+            ],
+            error: null,
+          }
+        }
+
+        const previous = { ...room }
+        const nextVersion = currentVersion + 1
+        const now = nowIso()
+        const updated: Row = {
+          ...room,
+          metadata: newMetadata,
+          state_version: nextVersion,
+          last_activity_at: now,
+          ...(markFinished ? { state: 'finished' } : {}),
+        }
+        db.tables.game_rooms[idx] = updated
+        saveDb(db)
+        applyUpdateTriggers('game_rooms', updated, previous, db)
+        emitDbChange({
+          table: 'game_rooms',
+          eventType: 'UPDATE',
+          new: { ...updated },
+          old: previous,
+        })
+
+        return {
+          data: [
+            {
+              ok: true,
+              conflict: false,
+              state_version: nextVersion,
+              metadata: updated.metadata,
+              state: updated.state,
+              last_activity_at: updated.last_activity_at,
+            },
+          ],
+          error: null,
+        }
+      }
+
+      return { data: null, error: { message: `Unknown RPC: ${fnName}` } }
     },
     channel(name: string) {
       const ch = { name, listeners: [] as ChannelListener[] }

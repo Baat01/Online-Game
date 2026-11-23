@@ -1,12 +1,14 @@
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import {
   acceptInvite,
   cancelInvite,
+  cleanupInactiveRooms,
   createRoom,
   declineInvite,
+  deleteRoom,
   getGames,
   getInvites,
   getMyActiveRooms,
@@ -64,18 +66,27 @@ export function useGames() {
 }
 
 // ─────────────────────────────────────────────
-// Room (realtime + mobile wake sync)
+// Room (realtime + authoritative mount refetch + delete detection)
 // ─────────────────────────────────────────────
 
-export function useRoom(roomId: string) {
+export function useRoom(roomId: string, options?: { onRoomDeleted?: () => void }) {
   const queryClient = useQueryClient()
   const key = lobbyKeys.room(roomId)
+  const [isDeleted, setIsDeleted] = useState(false)
+  const onRoomDeletedRef = useRef(options?.onRoomDeleted)
+  onRoomDeletedRef.current = options?.onRoomDeleted
+
+  useEffect(() => {
+    setIsDeleted(false)
+  }, [roomId])
 
   const query = useQuery({
     queryKey: key,
     queryFn: () => getRoomWithPlayers(roomId),
-    enabled: Boolean(roomId),
+    enabled: Boolean(roomId) && !isDeleted,
     staleTime: 0,
+    refetchOnMount: 'always',
+    retry: false,
   })
 
   useEffect(() => {
@@ -88,13 +99,20 @@ export function useRoom(roomId: string) {
 
     const unsubscribe = subscribeToRoom(roomId, {
       onRoomChange: (partial) => {
-        queryClient.setQueryData<GameRoom>(key, (old) => (old ? { ...old, ...partial } : old))
+        queryClient.setQueryData<GameRoom>(key, (old) => {
+          if (!old) return old
+          const oldVer = old.stateVersion ?? 0
+          const incomingVer = partial.stateVersion
+          if (typeof incomingVer === 'number' && incomingVer < oldVer) {
+            return old
+          }
+          return { ...old, ...partial }
+        })
         if (partial.state === 'playing') {
           syncNow()
         }
       },
       onPlayersChange: (change?: RoomPlayerChangeEvent) => {
-        // Immediately patch ready/removal in React state for zero-delay UI feedback
         if (change?.eventType === 'UPDATE' && change.userId && typeof change.ready === 'boolean') {
           queryClient.setQueryData<GameRoom>(key, (old) => {
             if (!old) return old
@@ -110,8 +128,13 @@ export function useRoom(roomId: string) {
             return recomputeLobbyRoomState({ ...old, players: nextPlayers })
           })
         }
-        // Always refetch full room + players profiles (avatar, clan, Yen, themes)
         syncNow()
+      },
+      onRoomDeleted: () => {
+        setIsDeleted(true)
+        queryClient.removeQueries({ queryKey: key })
+        void queryClient.invalidateQueries({ queryKey: lobbyKeys.publicRooms() })
+        onRoomDeletedRef.current?.()
       },
       onGameStarted: () => {
         queryClient.setQueryData<GameRoom>(key, (old) =>
@@ -141,7 +164,7 @@ export function useRoom(roomId: string) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, queryClient])
 
-  return query
+  return { ...query, isDeleted }
 }
 
 // ─────────────────────────────────────────────
@@ -181,6 +204,14 @@ export function usePublicRooms(enabled = true) {
 
     const unsubscribe = subscribeToPublicRooms(syncRooms)
 
+    // Light periodic cleanup for inactive > 30 min rooms while lobby is open
+    const cleanupInterval = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      void cleanupInactiveRooms().then((deletedCount) => {
+        if (deletedCount > 0) syncRooms()
+      })
+    }, 60_000)
+
     const onWake = () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
       syncRooms()
@@ -191,6 +222,7 @@ export function usePublicRooms(enabled = true) {
 
     return () => {
       unsubscribe()
+      window.clearInterval(cleanupInterval)
       window.removeEventListener('focus', onWake)
       window.removeEventListener('online', onWake)
       document.removeEventListener('visibilitychange', onWake)
@@ -288,7 +320,6 @@ export function useLobby(options?: { includePublicRooms?: boolean }) {
     refetch: refetchRooms,
   } = usePublicRooms(Boolean(options?.includePublicRooms))
 
-  // ── Create Room ───────────────────────────────────────────────────────────
   const createRoomMutation = useMutation({
     mutationFn: ({
       gameSlug,
@@ -309,7 +340,6 @@ export function useLobby(options?: { includePublicRooms?: boolean }) {
     },
   })
 
-  // ── Join Room ─────────────────────────────────────────────────────────────
   const joinRoomMutation = useMutation({
     mutationFn: (roomId: string) => joinRoom(roomId),
     onSuccess: (_, roomId) => {
@@ -321,7 +351,6 @@ export function useLobby(options?: { includePublicRooms?: boolean }) {
     },
   })
 
-  // ── Leave Room ────────────────────────────────────────────────────────────
   const leaveRoomMutation = useMutation({
     mutationFn: (roomId: string) => leaveRoom(roomId),
     onSuccess: (_, roomId) => {
@@ -334,7 +363,23 @@ export function useLobby(options?: { includePublicRooms?: boolean }) {
     },
   })
 
-  // ── Set Ready (optimistic + authoritative refetch) ────────────────────────
+  const deleteRoomMutation = useMutation({
+    mutationFn: (roomId: string) => deleteRoom(roomId, user?.id),
+    onSuccess: (_, roomId) => {
+      queryClient.removeQueries({ queryKey: lobbyKeys.room(roomId) })
+      queryClient.setQueryData<GameRoom[]>(lobbyKeys.publicRooms(), (old = []) =>
+        old.filter((r) => r.id !== roomId),
+      )
+      if (user) {
+        queryClient.setQueryData<GameRoom[]>(lobbyKeys.myActiveRooms(user.id), (old = []) =>
+          old.filter((r) => r.id !== roomId),
+        )
+        void queryClient.invalidateQueries({ queryKey: lobbyKeys.myActiveRooms(user.id) })
+      }
+      void queryClient.invalidateQueries({ queryKey: lobbyKeys.publicRooms() })
+    },
+  })
+
   const setReadyMutation = useMutation({
     mutationFn: ({ roomId, ready }: { roomId: string; ready: boolean }) =>
       setReady(roomId, ready),
@@ -354,7 +399,6 @@ export function useLobby(options?: { includePublicRooms?: boolean }) {
     },
   })
 
-  // ── Update Room Visibility ────────────────────────────────────────────────
   const updateVisibilityMutation = useMutation({
     mutationFn: ({ roomId, isPublic }: { roomId: string; isPublic: boolean }) =>
       updateRoomVisibility(roomId, isPublic),
@@ -366,7 +410,6 @@ export function useLobby(options?: { includePublicRooms?: boolean }) {
     },
   })
 
-  // ── Launch Game ───────────────────────────────────────────────────────────
   const launchGameMutation = useMutation({
     mutationFn: (roomId: string) => launchGame(roomId),
     onSuccess: (_, roomId) => {
@@ -378,7 +421,6 @@ export function useLobby(options?: { includePublicRooms?: boolean }) {
     },
   })
 
-  // ── Kick Player ───────────────────────────────────────────────────────────
   const kickPlayerMutation = useMutation({
     mutationFn: ({ roomId, userId }: { roomId: string; userId: string }) =>
       kickPlayer(roomId, userId),
@@ -387,7 +429,6 @@ export function useLobby(options?: { includePublicRooms?: boolean }) {
     },
   })
 
-  // ── Invite ────────────────────────────────────────────────────────────────
   const inviteMutation = useMutation({
     mutationFn: ({
       roomId,
@@ -403,7 +444,6 @@ export function useLobby(options?: { includePublicRooms?: boolean }) {
     },
   })
 
-  // ── Accept Invite ─────────────────────────────────────────────────────────
   const acceptInviteMutation = useMutation({
     mutationFn: (inviteId: string) => acceptInvite(inviteId),
     onSuccess: (roomId, inviteId) => {
@@ -420,7 +460,6 @@ export function useLobby(options?: { includePublicRooms?: boolean }) {
     },
   })
 
-  // ── Decline Invite ────────────────────────────────────────────────────────
   const declineInviteMutation = useMutation({
     mutationFn: (inviteId: string) => declineInvite(inviteId),
     onSuccess: (_, inviteId) => {
@@ -432,7 +471,6 @@ export function useLobby(options?: { includePublicRooms?: boolean }) {
     },
   })
 
-  // ── Cancel Invite ─────────────────────────────────────────────────────────
   const cancelInviteMutation = useMutation({
     mutationFn: ({ inviteId, roomId }: { inviteId: string; roomId: string }) =>
       cancelInvite(inviteId).then(() => roomId),
@@ -441,7 +479,6 @@ export function useLobby(options?: { includePublicRooms?: boolean }) {
     },
   })
 
-  // ── Stable callbacks ──────────────────────────────────────────────────────
   const handleCreateRoom = useCallback(
     (gameSlug: string, maxPlayers?: number, isPublic?: boolean) =>
       createRoomMutation.mutateAsync({ gameSlug, maxPlayers, isPublic }),
@@ -454,6 +491,10 @@ export function useLobby(options?: { includePublicRooms?: boolean }) {
   const handleLeaveRoom = useCallback(
     (roomId: string) => leaveRoomMutation.mutateAsync(roomId),
     [leaveRoomMutation],
+  )
+  const handleDeleteRoom = useCallback(
+    (roomId: string) => deleteRoomMutation.mutateAsync(roomId),
+    [deleteRoomMutation],
   )
   const handleSetReady = useCallback(
     (roomId: string, ready: boolean) => setReadyMutation.mutateAsync({ roomId, ready }),
@@ -504,6 +545,8 @@ export function useLobby(options?: { includePublicRooms?: boolean }) {
     isCreatingRoom: createRoomMutation.isPending,
     joinRoom: handleJoinRoom,
     leaveRoom: handleLeaveRoom,
+    deleteRoom: handleDeleteRoom,
+    isDeletingRoom: deleteRoomMutation.isPending,
     setReady: handleSetReady,
     updateRoomVisibility: handleUpdateVisibility,
     launchGame: handleLaunchGame,

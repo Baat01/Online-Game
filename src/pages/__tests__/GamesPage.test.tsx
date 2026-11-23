@@ -27,6 +27,7 @@ vi.mock('@/components/ui/Toast', () => ({
 
 const mockCreateRoom = vi.fn()
 const mockJoinRoom = vi.fn()
+const mockDeleteRoom = vi.fn().mockResolvedValue(undefined)
 const mockAccept = vi.fn()
 const mockDecline = vi.fn()
 
@@ -90,6 +91,7 @@ vi.mock('@/hooks/useLobby', () => ({
     isCreatingRoom: false,
     createRoom: mockCreateRoom,
     joinRoom: mockJoinRoom,
+    deleteRoom: mockDeleteRoom,
     accept: mockAccept,
     decline: mockDecline,
   }),
@@ -177,5 +179,12 @@ describe('GamesPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /règles de blackjack/i }))
     expect(screen.getByTestId('game-rules-modal')).toBeInTheDocument()
     expect(screen.getByText(/valeur des cartes/i)).toBeInTheDocument()
+  })
+
+  it('allows host to delete their own active room directly from GamesPage', async () => {
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: /supprimer le salon room-my-playing-1/i }))
+    fireEvent.click(screen.getByRole('button', { name: /confirmer/i }))
+    expect(mockDeleteRoom).toHaveBeenCalledWith('room-my-playing-1')
   })
 })

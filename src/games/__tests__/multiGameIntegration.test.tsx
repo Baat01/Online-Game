@@ -871,4 +871,123 @@ describe('Multi-Game UI, Realtime Room, Yen Wagering & Player-Bound Themes', () 
     })
     vGuestResult.unmount()
   })
+
+  it('syncs bidirectional J1/J2 choices via atomic commit_game_state (even after conflict & rejoin) and handles manual delete + 30m expiration', async () => {
+    const client = localClient.current!
+    const state = createInitialArcane23State([DEMO_HOST_ID, DEMO_GUEST_ID], DEMO_HOST_ID)
+    state.playersRecord[DEMO_HOST_ID].classicDeck = [{ id: 'hK', suit: 'hearts', rank: 'K' }]
+    state.playersRecord[DEMO_GUEST_ID].classicDeck = [{ id: 'c8', suit: 'clubs', rank: '8' }]
+    const roomId = await seedRoom('23e-arcane', state as unknown as Record<string, unknown>)
+
+    // Simulate J1 making their choice while J2 is about to submit on stale version 0 (concurrent conflict!)
+    const { data: rpc1 } = await (client as unknown as {
+      rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: Array<{ ok: boolean; conflict: boolean; state_version: number }> }>
+    }).rpc('commit_game_state', {
+      p_room_id: roomId,
+      p_new_metadata: {
+        ...state,
+        playersRecord: {
+          ...state.playersRecord,
+          [DEMO_HOST_ID]: { ...state.playersRecord[DEMO_HOST_ID], choice: 'classic' },
+        },
+      },
+      p_expected_version: 0,
+      p_mark_finished: false,
+    })
+    expect(rpc1[0].ok).toBe(true)
+    expect(rpc1[0].state_version).toBe(1)
+
+    // A stale write with expected_version 0 detects conflict instead of overwriting J1's choice
+    const { data: rpcConflict } = await (client as unknown as {
+      rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: Array<{ ok: boolean; conflict: boolean; state_version: number }> }>
+    }).rpc('commit_game_state', {
+      p_room_id: roomId,
+      p_new_metadata: state,
+      p_expected_version: 0,
+      p_mark_finished: false,
+    })
+    expect(rpcConflict[0].ok).toBe(false)
+    expect(rpcConflict[0].conflict).toBe(true)
+    expect(rpcConflict[0].state_version).toBe(1)
+
+    // J2 opens Arcane23Page, clicks classic -> commits via commit_game_state (version -> 2) and reveals both cards!
+    currentTestUserId = DEMO_GUEST_ID
+    const vGuest = renderGameRoute(
+      '/room/:roomId/play/23e-arcane',
+      `/room/${roomId}/play/23e-arcane`,
+      <Arcane23Page />,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /tirer carte classique/i }))
+    expect(await screen.findByTestId('classic-reveal-banner')).toBeInTheDocument()
+    vGuest.unmount()
+
+    // J1 leaves and rejoins the table -> immediately gets server version 2 (CLASSIC_REVEAL), NEVER stuck waiting for J2!
+    currentTestUserId = DEMO_HOST_ID
+    const vHostRejoin = renderGameRoute(
+      '/room/:roomId/play/23e-arcane',
+      `/room/${roomId}/play/23e-arcane`,
+      <Arcane23Page />,
+    )
+    expect(await screen.findByTestId('classic-reveal-banner')).toBeInTheDocument()
+    vHostRejoin.unmount()
+
+    // Manual room deletion: Guest seated in GameRoomPage is redirected to /games with toast when Host deletes the room
+    const { data: delRoom } = await client
+      .from('game_rooms')
+      .insert({
+        game_slug: 'four-seasons',
+        host_id: DEMO_HOST_ID,
+        state: 'waiting',
+        max_players: 2,
+        is_public: true,
+      })
+      .select('id')
+      .single()
+    const delRoomId = (delRoom as { id: string }).id
+    await client.from('room_players').insert({
+      room_id: delRoomId,
+      user_id: DEMO_GUEST_ID,
+      ready: false,
+    })
+
+    currentTestUserId = DEMO_GUEST_ID
+    const vGuestSeated = renderGameRoute('/room/:roomId', `/room/${delRoomId}`, <GameRoomPage />)
+    await screen.findByText('Sam Chen')
+
+    await client.from('game_rooms').delete().eq('id', delRoomId)
+
+    await waitFor(() => {
+      expect(screen.getByText('Games Catalog')).toBeInTheDocument()
+      expect(screen.getByText(/ce salon a été supprimé/i)).toBeInTheDocument()
+    })
+    vGuestSeated.unmount()
+
+    // Automatic 30-minute inactivity cleanup removes stale rooms while keeping active ones
+    const staleTimestamp = new Date(Date.now() - 35 * 60 * 1000).toISOString()
+    const { data: staleRoom } = await client
+      .from('game_rooms')
+      .insert({
+        game_slug: 'saving-throw',
+        host_id: DEMO_HOST_ID,
+        state: 'waiting',
+        max_players: 2,
+        is_public: true,
+        last_activity_at: staleTimestamp,
+      })
+      .select('id')
+      .single()
+    const staleId = (staleRoom as { id: string }).id
+
+    const { data: cleaned } = await (client as unknown as {
+      rpc: (fn: string) => Promise<{ data: number }>
+    }).rpc('cleanup_inactive_rooms')
+    expect(cleaned).toBeGreaterThanOrEqual(1)
+
+    const { data: afterCleanup } = await client
+      .from('game_rooms')
+      .select('id')
+      .eq('id', staleId)
+      .maybeSingle()
+    expect(afterCleanup).toBeNull()
+  })
 })
