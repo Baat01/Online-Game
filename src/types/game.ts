@@ -4,6 +4,7 @@
  * Every game in the /games directory must conform to the IGamePlugin interface.
  * This ensures the lobby, routing, and room system can handle any game generically.
  */
+import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 
 /** Phases a game room passes through during its lifecycle */
@@ -46,6 +47,10 @@ export interface IGamePlugin {
    * Returns initial game state.
    */
   launch?: (players: string[]) => Record<string, unknown>
+  /**
+   * Routes exposed by this game plugin.
+   */
+  routes?: Array<{ path: string; element?: ReactNode }>
 }
 
 /** A player seated in a game room */

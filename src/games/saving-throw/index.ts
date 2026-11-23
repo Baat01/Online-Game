@@ -1,6 +1,8 @@
+import { createElement } from 'react'
 import { Dices } from 'lucide-react'
 import type { IGamePlugin } from '@/types/game'
 import { createInitialState } from './engine/savingThrowEngine'
+import { SavingThrowPage } from './pages/SavingThrowPage'
 
 export const savingThrowPlugin: IGamePlugin = {
   id: 'saving-throw',
@@ -16,10 +18,16 @@ export const savingThrowPlugin: IGamePlugin = {
   createRoom: (_hostId, _maxPlayers) => {
     return {}
   },
-  
+
   launch: (players: string[]) => {
-    // Only works for 2 players
-    const hostId = players[0] // or passed in, but the launcher can just use first player as host roughly, or we initialize properly in the component
+    const hostId = players[0]
     return createInitialState(players, hostId) as unknown as Record<string, unknown>
-  }
+  },
+
+  routes: [
+    {
+      path: 'room/:roomId/play/saving-throw',
+      element: createElement(SavingThrowPage),
+    },
+  ],
 }

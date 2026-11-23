@@ -27,6 +27,7 @@ function toGameRoom(
     max_players: number
     created_at: string
     started_at: string | null
+    metadata?: unknown
   },
   players: RoomPlayer[] = [],
 ): GameRoom {
@@ -38,6 +39,7 @@ function toGameRoom(
     maxPlayers: row.max_players,
     createdAt: row.created_at,
     startedAt: row.started_at,
+    ...(row.metadata !== undefined ? { metadata: row.metadata as Record<string, unknown> } : {}),
     players,
   }
 }
@@ -160,7 +162,7 @@ export async function createRoom(gameSlug: string, maxPlayers = 6): Promise<Game
 export async function getRoom(roomId: string): Promise<GameRoom> {
   const { data: roomData, error: roomError } = await supabase
     .from('game_rooms')
-    .select('id, game_slug, host_id, state, max_players, created_at, started_at')
+    .select('id, game_slug, host_id, state, max_players, created_at, started_at, metadata')
     .eq('id', roomId)
     .single()
 

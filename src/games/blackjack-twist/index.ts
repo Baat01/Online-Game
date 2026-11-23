@@ -1,6 +1,8 @@
+import { createElement } from 'react'
 import { Sparkles } from 'lucide-react'
 import type { IGamePlugin } from '@/types/game'
 import { dealInitial } from './engine/twistEngine'
+import { BlackjackTwistPage } from './pages/BlackjackTwistPage'
 
 export const blackjackTwistPlugin: IGamePlugin = {
   id: 'blackjack-twist',
@@ -16,9 +18,16 @@ export const blackjackTwistPlugin: IGamePlugin = {
   createRoom: (_hostId, _maxPlayers) => {
     return {}
   },
-  
+
   launch: (players: string[]) => {
     const hostId = players[0]
     return dealInitial(players, hostId) as unknown as Record<string, unknown>
-  }
+  },
+
+  routes: [
+    {
+      path: 'room/:roomId/play/blackjack-twist',
+      element: createElement(BlackjackTwistPage),
+    },
+  ],
 }

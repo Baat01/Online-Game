@@ -1,7 +1,10 @@
-export function rollDice(sides: number): number {
-  return Math.floor(Math.random() * sides) + 1;
-}
-
-export function flipCoin(): 'heads' | 'tails' {
-  return Math.random() < 0.5 ? 'heads' : 'tails';
-}
+export {
+  type RngFn,
+  createSeededRng,
+  rollDie,
+  rollDice,
+  roll2d10,
+  combine2d10,
+  flipCoin,
+  shuffleArray,
+} from './randomUtils'

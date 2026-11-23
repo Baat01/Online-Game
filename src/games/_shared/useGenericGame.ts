@@ -1,24 +1,87 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useQueryClient, useMutation } from '@tanstack/react-query'
-import { supabase } from '@/lib/supabase'
+import { supabase, isLocalDemoMode } from '@/lib/supabase'
+import { DEMO_GUEST_ID } from '@/lib/localSupabase'
 import { useRoom, lobbyKeys } from '@/hooks/useLobby'
 import { useAuth } from '@/hooks/useAuth'
 import { generateChecksum } from '@/platform/sync/syncEngine'
+import { getGameBySlug } from '../registry'
+import type { BaseGameState } from '@/types/game'
+import type { Json } from '@/types/database'
 
-export function useGenericGame<T>(roomId: string) {
+interface UseGenericGameOptions<T extends BaseGameState> {
+  gameSlug?: string
+  createInitialState?: (playerIds: string[], hostId: string) => T
+}
+
+function isInitializedState<T extends BaseGameState>(meta: unknown): meta is T {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return false
+  const record = meta as Record<string, unknown>
+  return (
+    typeof record.status === 'string' &&
+    typeof record.playersRecord === 'object' &&
+    record.playersRecord !== null
+  )
+}
+
+export function useGenericGame<T extends BaseGameState>(
+  roomId: string,
+  options?: UseGenericGameOptions<T>,
+) {
   const queryClient = useQueryClient()
-  const { data: roomRaw, isLoading } = useRoom(roomId)
-  const room = roomRaw as any
+  const { data: room, isLoading } = useRoom(roomId)
   const { user } = useAuth()
-  const [gameState, setGameState] = useState<T | null>((room?.metadata as T) || null)
+
+  const initialFromRoom = isInitializedState<T>(room?.metadata) ? room.metadata : null
+  const [gameState, setGameState] = useState<T | null>(initialFromRoom)
+
+  const metadataRef = useRef<unknown>(room?.metadata)
+  const actionLockRef = useRef(false)
+  const autoInitRef = useRef(false)
 
   useEffect(() => {
-    if (room?.metadata) {
-      setGameState(room.metadata as T)
+    metadataRef.current = room?.metadata
+    if (isInitializedState<T>(room?.metadata)) {
+      setGameState(room.metadata)
     }
   }, [room?.metadata])
 
-  // Realtime subscription for game_events
+  const playerProfiles = useMemo(() => {
+    const map: Record<string, { username: string; displayName: string; avatarUrl: string | null }> = {}
+    for (const p of room?.players ?? []) {
+      map[p.userId] = {
+        username: p.profile.username,
+        displayName: p.profile.display_name || p.profile.username,
+        avatarUrl: p.profile.avatar_url,
+      }
+    }
+    if (isLocalDemoMode && !map[DEMO_GUEST_ID]) {
+      map[DEMO_GUEST_ID] = {
+        username: 'sam_challenger',
+        displayName: 'Sam Chen',
+        avatarUrl: null,
+      }
+    }
+    return map
+  }, [room?.players])
+
+  const emitEvent = useCallback(
+    async ({ type, payload }: { type: string; payload: Record<string, unknown> }) => {
+      if (!roomId || !user) return
+      const { error } = await supabase.from('game_events').insert({
+        room_id: roomId,
+        user_id: user.id,
+        type,
+        payload: payload as Json,
+      })
+      if (error) {
+        console.warn('[useGenericGame] Failed to emit event:', error.message)
+      }
+    },
+    [roomId, user],
+  )
+
+  // Realtime subscription for game_rooms metadata & game_events
   useEffect(() => {
     if (!roomId) return
 
@@ -27,96 +90,154 @@ export function useGenericGame<T>(roomId: string) {
     channel.on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'game_events', filter: `room_id=eq.${roomId}` },
-      (_payload) => {
-        // Here we could trigger a callback if the game provided one
-      }
+      () => {
+        // Events are logged for replay & diagnostics
+      },
     )
 
     channel.on(
       'postgres_changes',
       { event: 'UPDATE', schema: 'public', table: 'game_rooms', filter: `id=eq.${roomId}` },
       (payload) => {
-        if (payload.new && (payload.new as any).metadata) {
-          setGameState((payload.new as any).metadata as T)
+        const nextRow = payload.new as { metadata?: unknown; state?: string } | undefined
+        if (nextRow && isInitializedState<T>(nextRow.metadata)) {
+          setGameState(nextRow.metadata)
+
+          const serverChecksum = generateChecksum(nextRow.metadata)
+          const localChecksum = generateChecksum(metadataRef.current)
+          if (serverChecksum !== localChecksum) {
+            void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) })
+          }
         }
-        
-        // Desync detection: if the server metadata hash doesn't match our cache, trigger a refetch
-        const serverChecksum = generateChecksum((payload.new as any).metadata);
-        const localChecksum = generateChecksum(room?.metadata);
-        
-        if (serverChecksum !== localChecksum) {
-          console.warn(`[Desync Detected] Server: ${serverChecksum} vs Local: ${localChecksum}. Recovering state...`);
-          // Recover automatically
-          void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) });
-        }
-      }
+      },
     )
 
-    // Reconnection and recovery
-    channel.on('system', { event: '*' }, (payload) => {
+    channel.on('system', { event: '*' }, (payload: { extension?: string; status?: string }) => {
       if (payload.extension === 'postgres_changes' && payload.status === 'ok') {
-        // Reconnected successfully. We must refetch in case we missed events while disconnected.
-        void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) });
+        void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) })
       }
     })
 
-    // Also recover on browser focus
     const onFocus = () => {
-      void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) });
+      void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) })
     }
     window.addEventListener('focus', onFocus)
 
     channel.subscribe()
     return () => {
-      supabase.removeChannel(channel)
+      void supabase.removeChannel(channel)
       window.removeEventListener('focus', onFocus)
     }
-  }, [roomId, room?.metadata, queryClient])
+  }, [roomId, queryClient])
 
   const updateStateMutation = useMutation({
-    mutationFn: async (newState: Partial<T>) => {
+    mutationFn: async (newState: Partial<T> & { markRoomFinished?: boolean }) => {
       if (!roomId) throw new Error('No room id')
-      const merged = { ...((room?.metadata as any) || {}), ...newState }
-      
-      // Optimistic update for immediate UI response
-      queryClient.setQueryData(lobbyKeys.room(roomId), (old: any) => {
-        if (!old) return old
-        return { ...old, metadata: merged }
-      })
-
-      const { error } = await supabase
-        .from('game_rooms')
-        .update({ metadata: merged })
-        .eq('id', roomId)
-      
-      if (error) {
-        // Rollback
-        void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) })
-        throw error
+      if (actionLockRef.current) {
+        throw new Error('Action already in progress')
       }
-      return merged
-    }
+      actionLockRef.current = true
+      try {
+        const { markRoomFinished, ...statePatch } = newState
+        const base = isInitializedState<T>(metadataRef.current)
+          ? metadataRef.current
+          : (gameState ?? {})
+        const merged = { ...base, ...statePatch } as T
+
+        setGameState(merged)
+        metadataRef.current = merged
+
+        queryClient.setQueryData(lobbyKeys.room(roomId), (old: Record<string, unknown> | undefined) => {
+          if (!old) return old
+          return {
+            ...old,
+            metadata: merged,
+            ...(markRoomFinished ? { state: 'finished' } : {}),
+          }
+        })
+
+        const updatePayload: { metadata: Json; state?: 'finished' } = {
+          metadata: merged as unknown as Json,
+        }
+        if (markRoomFinished) {
+          updatePayload.state = 'finished'
+        }
+
+        const { error } = await supabase
+          .from('game_rooms')
+          .update(updatePayload)
+          .eq('id', roomId)
+
+        if (error) {
+          void queryClient.invalidateQueries({ queryKey: lobbyKeys.room(roomId) })
+          throw error
+        }
+
+        return merged
+      } finally {
+        actionLockRef.current = false
+      }
+    },
   })
 
-  const emitEvent = useCallback(async ({ type, payload }: { type: string; payload: any }) => {
-    if (!roomId || !user) throw new Error('Missing room or user')
-    const { error } = await supabase
-      .from('game_events')
-      .insert({
-        room_id: roomId,
-        user_id: user.id,
-        type,
-        payload
+  // Auto-initialize game state on mount if host enters an uninitialized room
+  const isHost = room?.hostId === user?.id
+  const createInitialRef = useRef(options?.createInitialState)
+  createInitialRef.current = options?.createInitialState
+
+  useEffect(() => {
+    if (!room || !user || !isHost) return
+    if (isInitializedState<T>(room.metadata)) return
+    if (autoInitRef.current) return
+
+    const playerIds = room.players.map((p) => p.userId)
+    if (playerIds.length < 2 && isLocalDemoMode) {
+      if (!playerIds.includes(DEMO_GUEST_ID)) {
+        playerIds.push(DEMO_GUEST_ID)
+      }
+    }
+    if (playerIds.length < 2) return
+
+    const plugin = getGameBySlug(options?.gameSlug ?? room.gameSlug)
+    const initial = createInitialRef.current
+      ? createInitialRef.current(playerIds, room.hostId)
+      : (plugin?.launch?.(playerIds) as T | undefined)
+
+    if (!initial || !isInitializedState<T>(initial)) return
+
+    autoInitRef.current = true
+    void updateStateMutation
+      .mutateAsync(initial)
+      .then(() => emitEvent({ type: 'game_started', payload: { players: playerIds } }))
+      .catch(() => {
+        autoInitRef.current = false
       })
-    if (error) throw error
-  }, [roomId, user])
+  }, [room, user, isHost, options?.gameSlug, updateStateMutation, emitEvent])
+
+  const resetMatch = useCallback(async () => {
+    if (!room || !isHost) return
+    const playerIds = room.players.map((p) => p.userId)
+    if (playerIds.length < 2 && isLocalDemoMode && !playerIds.includes(DEMO_GUEST_ID)) {
+      playerIds.push(DEMO_GUEST_ID)
+    }
+    const plugin = getGameBySlug(options?.gameSlug ?? room.gameSlug)
+    const fresh = createInitialRef.current
+      ? createInitialRef.current(playerIds, room.hostId)
+      : (plugin?.launch?.(playerIds) as T | undefined)
+    if (!fresh) return
+    await updateStateMutation.mutateAsync(fresh)
+    await emitEvent({ type: 'game_started', payload: { players: playerIds, rematch: true } })
+  }, [room, isHost, options?.gameSlug, updateStateMutation, emitEvent])
 
   return {
+    room,
     gameState,
     isLoading,
-    isHost: room?.hostId === user?.id,
+    isHost,
+    playerProfiles,
     updateGameState: updateStateMutation.mutateAsync,
     isUpdating: updateStateMutation.isPending,
     emitEvent,
+    resetMatch,
   }
 }

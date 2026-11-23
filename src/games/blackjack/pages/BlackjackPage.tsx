@@ -9,6 +9,7 @@ import { supabase } from '@/lib/supabase'
 import { BlackjackTable } from '../components/BlackjackTable'
 import { ActionBar } from '../components/ActionBar'
 import { RoundResult } from '../components/RoundResult'
+import { CardThemeSelector } from '../../_shared/components'
 import { Button } from '@/components/ui/Button'
 import { Loader2 } from 'lucide-react'
 
@@ -95,8 +96,9 @@ export function BlackjackPage() {
     <div className="flex flex-col h-[calc(100vh-4rem)] bg-gradient-to-b from-green-900 to-green-950 overflow-hidden">
       
       {/* Top Bar */}
-      <div className="flex items-center justify-between px-4 py-2 bg-black/30 border-b border-white/10">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 bg-black/30 border-b border-white/10">
         <h1 className="text-lg font-bold text-white/90">Blackjack</h1>
+        <CardThemeSelector compact className="hidden sm:inline-flex" />
         <div className="flex gap-2">
           {isHost && game.status === 'waiting' && (
             <Button size="sm" variant="primary" onClick={() => start()} isLoading={isPending}>

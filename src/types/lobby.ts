@@ -56,6 +56,7 @@ export interface GameRoom {
   maxPlayers: number
   createdAt: string
   startedAt: string | null
+  metadata?: Record<string, unknown>
   players: RoomPlayer[]
 }
 
