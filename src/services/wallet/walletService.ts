@@ -1,6 +1,8 @@
 import { supabase } from '@/lib/supabase'
+import { DEFAULT_UNLOCKED_THEMES, SPECIAL_UNLOCKABLE_THEMES } from '@/games/_shared/themes'
 import type { Json } from '@/types/database'
 import type { GameRoom } from '@/types/lobby'
+import type { Profile } from '@/types/auth'
 
 export const PRESET_YEN_STAKES = [0, 100, 500, 1000, 5000] as const
 export const DEFAULT_YEN_BALANCE = 10000
@@ -251,7 +253,12 @@ export async function adminAdjustYenBalance(
 
 export async function updatePlayerCardThemes(
   userId: string,
-  themes: { card_front_theme?: string; card_back_theme?: string },
+  themes: {
+    card_front_theme?: string
+    card_back_theme?: string
+    dice_theme?: string
+    coin_theme?: string
+  },
 ): Promise<void> {
   const { error } = await supabase
     .from('profiles')
@@ -262,4 +269,63 @@ export async function updatePlayerCardThemes(
     .eq('id', userId)
 
   if (error) throw error
+}
+
+export const updatePlayerCosmetics = updatePlayerCardThemes
+
+export async function listProfilesForAdmin(): Promise<Profile[]> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .order('username')
+    .limit(50)
+
+  if (error) throw error
+  return (data ?? []) as Profile[]
+}
+
+export async function adminSetThemeUnlock(
+  targetUserId: string,
+  themeId: string,
+  unlocked: boolean,
+): Promise<string[]> {
+  const { data: prof, error: fetchErr } = await supabase
+    .from('profiles')
+    .select('unlocked_themes')
+    .eq('id', targetUserId)
+    .single()
+
+  if (fetchErr) throw fetchErr
+  const existing = Array.isArray((prof as { unlocked_themes?: unknown } | null)?.unlocked_themes)
+    ? ((prof as { unlocked_themes: string[] }).unlocked_themes)
+    : [...DEFAULT_UNLOCKED_THEMES]
+
+  const set = new Set<string>(existing)
+  if (unlocked) {
+    set.add(themeId)
+  } else {
+    set.delete(themeId)
+  }
+
+  const next = Array.from(set)
+  const { error: updErr } = await supabase
+    .from('profiles')
+    .update({ unlocked_themes: next, updated_at: new Date().toISOString() })
+    .eq('id', targetUserId)
+
+  if (updErr) throw updErr
+  return next
+}
+
+export async function adminUnlockAllThemes(targetUserId: string): Promise<string[]> {
+  const all = Array.from(
+    new Set([...DEFAULT_UNLOCKED_THEMES, ...SPECIAL_UNLOCKABLE_THEMES.map((t) => t.id)]),
+  )
+  const { error } = await supabase
+    .from('profiles')
+    .update({ unlocked_themes: all, updated_at: new Date().toISOString() })
+    .eq('id', targetUserId)
+
+  if (error) throw error
+  return all
 }

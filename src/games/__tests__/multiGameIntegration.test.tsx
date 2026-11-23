@@ -46,11 +46,13 @@ vi.mock('@/hooks/useAuth', () => ({
 }))
 
 import { ToastProvider } from '@/components/ui/Toast'
+import { GlobalInvitationPopup } from '@/components/lobby/GlobalInvitationPopup'
+import { useThemeStore } from '@/stores/themeStore'
 import { GameRoomPage } from '@/pages/GameRoomPage'
 import { SavingThrowPage } from '../saving-throw/pages/SavingThrowPage'
 import { BlackjackTwistPage } from '../blackjack-twist/pages/BlackjackTwistPage'
 import { FourSeasonsPage } from '../four-seasons/pages/FourSeasonsPage'
-import { CardThemeSelector, AnimatedDice, AnimatedCoinFlip } from '../_shared/components'
+import { CardThemeSelector, AnimatedDice, AnimatedCoinFlip, ThemedCard } from '../_shared/components'
 import { useCardThemeStore } from '../_shared/themes'
 import { createInitialState } from '../saving-throw/engine/savingThrowEngine'
 import { dealInitial } from '../blackjack-twist/engine/twistEngine'
@@ -67,6 +69,7 @@ function renderGameRoute(pathPattern: string, initialEntry: string, element: Rea
           <Routes>
             <Route path={pathPattern} element={element} />
             <Route path="/room/:roomId" element={<GameRoomPage />} />
+            <Route path="/games/room/:roomId" element={<GameRoomPage />} />
             <Route path="/room/:roomId/play/saving-throw" element={<div>Saving Throw Table</div>} />
             <Route path="/games" element={<div>Games Catalog</div>} />
           </Routes>
@@ -102,6 +105,7 @@ async function seedRoom(gameSlug: string, metadata: Record<string, unknown>) {
 describe('Phase 5 & 6 Multi-Game UI, Realtime Room, Yen Wagering & Player-Bound Themes', () => {
   beforeEach(() => {
     window.localStorage.clear()
+    window.sessionStorage.clear()
     localClient.current = createLocalSupabaseClient()
     currentTestUserId = DEMO_HOST_ID
     useCardThemeStore.getState().setFrontThemeId('classic')
@@ -170,7 +174,7 @@ describe('Phase 5 & 6 Multi-Game UI, Realtime Room, Yen Wagering & Player-Bound 
     expect(screen.getByLabelText(/aperçu recto/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/aperçu verso/i)).toBeInTheDocument()
 
-    const cyberBtn = screen.getByRole('button', { name: /cyber tokyo/i })
+    const cyberBtn = screen.getByRole('button', { name: /^cyber tokyo/i })
     fireEvent.click(cyberBtn)
     expect(useCardThemeStore.getState().frontThemeId).toBe('midnight-neon')
 
@@ -301,7 +305,7 @@ describe('Phase 5 & 6 Multi-Game UI, Realtime Room, Yen Wagering & Player-Bound 
     )
 
     fireEvent.click(await screen.findByRole('button', { name: /mes cartes/i }))
-    fireEvent.click(screen.getByRole('button', { name: /cyber tokyo/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^cyber tokyo/i }))
     expect(useCardThemeStore.getState().frontThemeId).toBe('midnight-neon')
     fireEvent.click(screen.getByRole('button', { name: /fermer/i }))
 
@@ -348,12 +352,13 @@ describe('Phase 5 & 6 Multi-Game UI, Realtime Room, Yen Wagering & Player-Bound 
     v3.unmount()
   })
 
-  it('plays Four Seasons 2-player turn showing opponent back theme & player front theme on discard', async () => {
+  it('plays Four Seasons 2-player turn showing strict next-season rule, opponent back & player front', async () => {
     const state = dealInitialHands([DEMO_HOST_ID, DEMO_GUEST_ID], DEMO_HOST_ID)
     state.activeSeason = 'hearts'
     state.discardPile = [{ id: 'h3', suit: 'hearts', rank: '3', ownerId: DEMO_GUEST_ID }]
     state.playersRecord[DEMO_HOST_ID].hand = [
       { id: 'd5', suit: 'diamonds', rank: '5', ownerId: DEMO_HOST_ID },
+      { id: 'h9', suit: 'hearts', rank: '9', ownerId: DEMO_HOST_ID },
       { id: 'c9', suit: 'clubs', rank: '9', ownerId: DEMO_HOST_ID },
     ]
     state.playersRecord[DEMO_GUEST_ID].hand = [
@@ -372,6 +377,10 @@ describe('Phase 5 & 6 Multi-Game UI, Realtime Room, Yen Wagering & Player-Bound 
     const playableCard = await screen.findByRole('button', { name: /play 5 of diamonds/i })
     expect(playableCard).toHaveAttribute('data-front-theme', 'royal-fantasy')
 
+    // Current season (hearts) is ALSO disallowed under strict next-season rule
+    const sameSeasonCard = screen.getByRole('button', { name: /play 9 of hearts/i })
+    expect(sameSeasonCard).toBeDisabled()
+
     // Opponent's hidden card back uses Sam's card_back_theme ('engei-crimson')
     const hiddenCards = screen.getAllByLabelText('Hidden card')
     expect(hiddenCards[0]).toHaveAttribute('data-back-theme', 'engei-crimson')
@@ -382,7 +391,7 @@ describe('Phase 5 & 6 Multi-Game UI, Realtime Room, Yen Wagering & Player-Bound 
     fireEvent.click(playableCard)
 
     await waitFor(() => {
-      expect(screen.getByText(/active season: summer/i)).toBeInTheDocument()
+      expect(screen.getByText(/saison actuelle : summer/i)).toBeInTheDocument()
     })
     v1.unmount()
 
@@ -406,5 +415,76 @@ describe('Phase 5 & 6 Multi-Game UI, Realtime Room, Yen Wagering & Player-Bound 
       expect(screen.getByText(/victory! your hand is empty!/i)).toBeInTheDocument()
     })
     v2.unmount()
+  })
+
+  it('shows GlobalInvitationPopup across routes and allows joining /games/room/:roomId or declining', async () => {
+    const client = localClient.current!
+    const { data: room } = await client
+      .from('game_rooms')
+      .insert({
+        game_slug: 'four-seasons',
+        host_id: DEMO_HOST_ID,
+        state: 'waiting',
+        max_players: 2,
+        metadata: { stakeYen: 500, potYen: 1000 } as never,
+      })
+      .select('id')
+      .single()
+
+    const roomId = (room as { id: string }).id
+    await client.from('game_invitations').insert({
+      sender_id: DEMO_HOST_ID,
+      receiver_id: DEMO_GUEST_ID,
+      game_slug: 'four-seasons',
+      room_id: roomId,
+      status: 'pending',
+    })
+
+    await client.auth.signInWithPassword({ email: 'sam@engei.local', password: 'password123' })
+    currentTestUserId = DEMO_GUEST_ID
+    const view = renderGameRoute('/friends', '/friends', <GlobalInvitationPopup />)
+
+    expect(await screen.findByText(/invitation engei/i)).toBeInTheDocument()
+    expect(screen.getByText('Alex Rivera')).toBeInTheDocument()
+    expect(await screen.findByText(/mise : 500 ¥/i)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /rejoindre la partie/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Four Seasons')).toBeInTheDocument()
+    })
+    view.unmount()
+  })
+
+  it('toggles Day/Night theme classes and renders Undertale Tarot, Dice, and Coin themes', () => {
+    useThemeStore.getState().setTheme('light')
+    expect(document.documentElement.classList.contains('light')).toBe(true)
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light')
+
+    useThemeStore.getState().toggleTheme()
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
+
+    render(
+      <div>
+        <ThemedCard suit="hearts" rank="A" frontThemeId="undertale-tarot" />
+        <AnimatedDice
+          tens={4}
+          units={2}
+          combinedScore={42}
+          diceThemeId="astral-crystal"
+          rollKey="k1"
+        />
+        <AnimatedCoinFlip choice="heads" result="heads" coinThemeId="railgun-coin" />
+      </div>,
+    )
+
+    const tarotCard = screen.getByLabelText('A of hearts')
+    expect(tarotCard).toHaveAttribute('data-front-theme', 'undertale-tarot')
+    expect(tarotCard).toHaveAttribute('data-tarot-arcana', 'Human')
+    expect(screen.getByText('Human')).toBeInTheDocument()
+
+    expect(document.querySelector('[data-dice-theme="astral-crystal"]')).toBeInTheDocument()
+    expect(document.querySelector('[data-coin-theme="railgun-coin"]')).toBeInTheDocument()
   })
 })

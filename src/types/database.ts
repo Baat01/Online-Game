@@ -568,12 +568,15 @@ export type Database = {
           card_back_theme: string
           card_front_theme: string
           clan_title: string | null
+          coin_theme: string
           created_at: string
+          dice_theme: string
           display_name: string | null
           id: string
           is_admin: boolean
           is_online: boolean
           last_seen: string
+          unlocked_themes: string[]
           updated_at: string
           username: string
           yen_balance: number
@@ -584,12 +587,15 @@ export type Database = {
           card_back_theme?: string
           card_front_theme?: string
           clan_title?: string | null
+          coin_theme?: string
           created_at?: string
+          dice_theme?: string
           display_name?: string | null
           id: string
           is_admin?: boolean
           is_online?: boolean
           last_seen?: string
+          unlocked_themes?: string[]
           updated_at?: string
           username: string
           yen_balance?: number
@@ -600,12 +606,15 @@ export type Database = {
           card_back_theme?: string
           card_front_theme?: string
           clan_title?: string | null
+          coin_theme?: string
           created_at?: string
+          dice_theme?: string
           display_name?: string | null
           id?: string
           is_admin?: boolean
           is_online?: boolean
           last_seen?: string
+          unlocked_themes?: string[]
           updated_at?: string
           username?: string
           yen_balance?: number

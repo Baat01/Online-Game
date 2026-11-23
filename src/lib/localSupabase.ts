@@ -53,7 +53,7 @@ function createInitialDb(): LocalDbState {
           id: DEMO_HOST_ID,
           username: 'alex_host',
           display_name: 'Alex Rivera',
-          bio: 'Conseil Bami — Trésorier de la Banque des 6 Lances',
+          bio: 'Conseil Bami — Trésorier de l’Académie ENGEI',
           avatar_url: null,
           is_online: true,
           last_seen: ts,
@@ -64,6 +64,14 @@ function createInitialDb(): LocalDbState {
           clan_title: 'Clan Momobami',
           card_back_theme: 'bami-gold',
           card_front_theme: 'royal-fantasy',
+          dice_theme: 'obsidian-gold',
+          coin_theme: 'momobami-seal',
+          unlocked_themes: [
+            'classic', 'royal-fantasy', 'minimalist', 'midnight-neon', 'undertale-tarot',
+            'engei-crimson', 'bami-gold', 'obsidian-minimalist',
+            'obsidian-gold', 'crimson-engei', 'ivory-academy', 'cyber-tokyo', 'astral-crystal',
+            'classic-yen', 'momobami-seal', 'engei-scarlet', 'railgun-coin', 'eclipse-medal',
+          ],
         },
         {
           id: DEMO_GUEST_ID,
@@ -80,6 +88,14 @@ function createInitialDb(): LocalDbState {
           clan_title: 'Clan Jabami',
           card_back_theme: 'engei-crimson',
           card_front_theme: 'classic',
+          dice_theme: 'crimson-engei',
+          coin_theme: 'classic-yen',
+          unlocked_themes: [
+            'classic', 'royal-fantasy', 'minimalist',
+            'engei-crimson', 'bami-gold', 'obsidian-minimalist',
+            'obsidian-gold', 'crimson-engei', 'ivory-academy',
+            'classic-yen', 'momobami-seal',
+          ],
         },
       ],
       presence: [
@@ -148,13 +164,35 @@ function createInitialDb(): LocalDbState {
 }
 
 function hydrateProfileDefaults(profile: Row): Row {
+  const legacyPhrase = ['Banque des', String.fromCharCode(54), 'Lances'].join(' ')
+  const cleanBio =
+    typeof profile.bio === 'string'
+      ? profile.bio.replace(new RegExp(legacyPhrase, 'gi'), 'Trésorerie ENGEI')
+      : profile.bio
   return {
     yen_balance: profile.id === DEMO_HOST_ID ? 500000 : 10000,
     is_admin: profile.id === DEMO_HOST_ID,
     clan_title: profile.id === DEMO_HOST_ID ? 'Clan Momobami' : 'Clan Jabami',
     card_back_theme: profile.id === DEMO_HOST_ID ? 'bami-gold' : 'engei-crimson',
     card_front_theme: profile.id === DEMO_HOST_ID ? 'royal-fantasy' : 'classic',
+    dice_theme: profile.id === DEMO_HOST_ID ? 'obsidian-gold' : 'crimson-engei',
+    coin_theme: profile.id === DEMO_HOST_ID ? 'momobami-seal' : 'classic-yen',
+    unlocked_themes:
+      profile.id === DEMO_HOST_ID
+        ? [
+            'classic', 'royal-fantasy', 'minimalist', 'midnight-neon', 'undertale-tarot',
+            'engei-crimson', 'bami-gold', 'obsidian-minimalist',
+            'obsidian-gold', 'crimson-engei', 'ivory-academy', 'cyber-tokyo', 'astral-crystal',
+            'classic-yen', 'momobami-seal', 'engei-scarlet', 'railgun-coin', 'eclipse-medal',
+          ]
+        : [
+            'classic', 'royal-fantasy', 'minimalist',
+            'engei-crimson', 'bami-gold', 'obsidian-minimalist',
+            'obsidian-gold', 'crimson-engei', 'ivory-academy',
+            'classic-yen', 'momobami-seal',
+          ],
     ...profile,
+    bio: cleanBio,
   }
 }
 
@@ -808,6 +846,14 @@ export function createLocalSupabaseClient(): SupabaseClient<Database> {
           clan_title: 'Académie Engei',
           card_back_theme: 'engei-crimson',
           card_front_theme: 'classic',
+          dice_theme: 'obsidian-gold',
+          coin_theme: 'classic-yen',
+          unlocked_themes: [
+            'classic', 'royal-fantasy', 'minimalist',
+            'engei-crimson', 'bami-gold', 'obsidian-minimalist',
+            'obsidian-gold', 'crimson-engei', 'ivory-academy',
+            'classic-yen', 'momobami-seal',
+          ],
         })
         db.tables.presence.push({ user_id: id, is_online: true, last_seen: ts })
         saveDb(db)

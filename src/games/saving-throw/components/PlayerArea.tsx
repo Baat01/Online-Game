@@ -10,6 +10,7 @@ interface PlayerAreaProps {
   isCurrentTurn: boolean
   isRoundWinner: boolean
   targetToBeat: number | null
+  diceThemeId?: string
 }
 
 export function PlayerArea({
@@ -19,6 +20,7 @@ export function PlayerArea({
   isCurrentTurn,
   isRoundWinner,
   targetToBeat,
+  diceThemeId,
 }: PlayerAreaProps) {
   const roleLabel =
     player.role === 'first'
@@ -86,6 +88,7 @@ export function PlayerArea({
         hasRerolled={player.hasRerolled}
         rollKey={`${player.userId}-${player.rollCount}`}
         highlightWinner={isRoundWinner}
+        diceThemeId={diceThemeId}
       />
 
       {/* Round / Lock status */}

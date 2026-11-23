@@ -21,6 +21,8 @@ import {
   lockRoomEscrow,
   settleRoomPayout,
   adminAdjustYenBalance,
+  adminSetThemeUnlock,
+  adminUnlockAllThemes,
   updatePlayerCardThemes,
   getRoomStake,
   getRoomPot,
@@ -49,7 +51,7 @@ async function createTwoPlayerRoom(stakeYen = 0) {
   return roomId
 }
 
-describe('walletService (Banque des 6 Lances)', () => {
+describe('walletService (Trésorerie ENGEI)', () => {
   beforeEach(() => {
     window.localStorage.clear()
     localClient.current = createLocalSupabaseClient()
@@ -168,5 +170,18 @@ describe('walletService (Banque des 6 Lances)', () => {
       card_front_theme: 'midnight-neon',
       card_back_theme: 'bami-gold',
     })
+  })
+
+  it('allows Admin to grant, revoke, and unlock all special themes for a player', async () => {
+    const granted = await adminSetThemeUnlock(DEMO_GUEST_ID, 'undertale-tarot', true)
+    expect(granted).toContain('undertale-tarot')
+
+    const revoked = await adminSetThemeUnlock(DEMO_GUEST_ID, 'undertale-tarot', false)
+    expect(revoked).not.toContain('undertale-tarot')
+
+    const all = await adminUnlockAllThemes(DEMO_GUEST_ID)
+    expect(all).toContain('undertale-tarot')
+    expect(all).toContain('astral-crystal')
+    expect(all).toContain('railgun-coin')
   })
 })

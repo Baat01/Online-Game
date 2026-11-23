@@ -18,6 +18,8 @@ interface UseGenericGameOptions<T extends BaseGameState> {
 export interface PlayerCardThemeSelection {
   frontThemeId?: string
   backThemeId?: string
+  diceThemeId?: string
+  coinThemeId?: string
 }
 
 function isInitializedState<T extends BaseGameState>(meta: unknown): meta is T {
@@ -92,6 +94,8 @@ export function useGenericGame<T extends BaseGameState>(
       map[p.userId] = {
         frontThemeId: p.profile.card_front_theme,
         backThemeId: p.profile.card_back_theme,
+        diceThemeId: p.profile.dice_theme,
+        coinThemeId: p.profile.coin_theme,
       }
     }
     return map

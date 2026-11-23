@@ -73,6 +73,10 @@ const routes: RouteObject[] = [
             element: <GameRoomPage />,
           },
           {
+            path: 'games/room/:roomId',
+            element: <GameRoomPage />,
+          },
+          {
             path: 'room/:roomId/play',
             element: <BlackjackPage />, // Fallback for existing blackjack path
           },

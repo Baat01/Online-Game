@@ -29,6 +29,7 @@ export function SavingThrowPage() {
     gameState,
     isHost,
     playerProfiles,
+    playerThemes,
     roomPotYen,
     updateGameState,
     emitEvent,
@@ -154,6 +155,7 @@ export function SavingThrowPage() {
         gameState={gameState}
         currentUserId={user?.id}
         playerProfiles={playerProfiles}
+        playerThemes={playerThemes}
         potYen={roomPotYen}
       />
 

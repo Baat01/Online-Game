@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import { clsx } from 'clsx'
 import { useOptionalAuthContext } from '@/contexts/AuthContext'
 import type { Rank, Suit } from '../deck'
 import {
+  getTarotArcanaForCard,
   resolveBackTheme,
   resolveFrontTheme,
   useCardTheme,
@@ -96,6 +98,7 @@ export function ThemedCard({
 }: ThemedCardProps) {
   const auth = useOptionalAuthContext()
   const { frontThemeId: storeFrontId, backThemeId: storeBackId } = useCardTheme()
+  const [imgError, setImgError] = useState(false)
 
   const frontTheme = resolveFrontTheme(
     frontThemeId ?? auth?.profile?.card_front_theme ?? storeFrontId,
@@ -103,6 +106,9 @@ export function ThemedCard({
   const backTheme = resolveBackTheme(
     backThemeId ?? auth?.profile?.card_back_theme ?? storeBackId,
   )
+
+  const isTarot = !isHidden && frontTheme.id === 'undertale-tarot'
+  const arcanum = isTarot ? getTarotArcanaForCard(suit, rank) : null
 
   const isInteractive = Boolean(onClick && playable && !disabled)
   const suitClass = frontTheme.suitColorClass[suit]
@@ -132,6 +138,59 @@ export function ThemedCard({
       >
         {backTheme.emblemSymbol}
       </div>
+    </div>
+  ) : isTarot && arcanum ? (
+    <div className="relative w-full h-full flex flex-col justify-between overflow-hidden rounded-md border border-amber-400/50 bg-black/40 p-0.5">
+      {/* Top bar: corner rank/suit + Roman numeral */}
+      <div className="flex items-center justify-between px-1 pt-0.5 z-10">
+        <div className={clsx('flex items-center gap-0.5 font-extrabold leading-none', suitClass)}>
+          <span className={size === 'sm' ? 'text-[10px]' : 'text-xs'}>{rank}</span>
+          <SuitGlyph suit={suit} className={size === 'sm' ? 'size-2.5' : 'size-3'} />
+        </div>
+        <span className="px-1 py-0.2 rounded bg-amber-500/20 border border-amber-400/50 text-[9px] font-serif font-bold text-amber-200">
+          {arcanum.roman}
+        </span>
+      </div>
+
+      {/* Center Tarot Artwork */}
+      <div className="relative flex-1 my-0.5 overflow-hidden rounded border border-amber-500/35 bg-stone-950 flex items-center justify-center">
+        {!imgError ? (
+          <img
+            src={arcanum.imagePath}
+            alt={`${arcanum.roman} — ${arcanum.name}`}
+            onError={() => setImgError(true)}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center p-1 text-center">
+            <span className="text-xs font-serif font-bold text-amber-300">{arcanum.roman}</span>
+            <SuitGlyph suit={suit} className={clsx('size-5 my-0.5', suitClass)} />
+          </div>
+        )}
+      </div>
+
+      {/* Bottom Arcana Title */}
+      <div className="px-1 pb-0.5 text-center z-10">
+        <p className="text-[9px] font-serif font-bold uppercase tracking-wider text-amber-200 truncate leading-tight">
+          {arcanum.name}
+        </p>
+        {seasonLabel && (
+          <p className="text-[8px] text-amber-400/80 uppercase leading-none">{seasonLabel}</p>
+        )}
+      </div>
+
+      {modifierBadge && (
+        <span
+          className={clsx(
+            'absolute -top-2 -right-2 px-1.5 py-0.5 rounded-full text-[10px] font-extrabold shadow border z-20',
+            modifierBadge.startsWith('-')
+              ? 'bg-rose-600 text-white border-rose-300'
+              : 'bg-emerald-600 text-white border-emerald-300',
+          )}
+        >
+          {modifierBadge}
+        </span>
+      )}
     </div>
   ) : (
     <>
@@ -186,14 +245,19 @@ export function ThemedCard({
     </>
   )
 
+  const commonDataProps = {
+    'data-front-theme': frontTheme.id,
+    'data-back-theme': backTheme.id,
+    ...(arcanum ? { 'data-tarot-arcana': arcanum.name } : {}),
+  }
+
   if (onClick) {
     return (
       <button
         type="button"
         onClick={isInteractive ? onClick : undefined}
         disabled={!isInteractive}
-        data-front-theme={frontTheme.id}
-        data-back-theme={backTheme.id}
+        {...commonDataProps}
         aria-label={ariaLabel ?? (isHidden ? 'Hidden card' : `${rank} of ${suit}`)}
         className={baseClasses}
       >
@@ -204,8 +268,7 @@ export function ThemedCard({
 
   return (
     <div
-      data-front-theme={frontTheme.id}
-      data-back-theme={backTheme.id}
+      {...commonDataProps}
       aria-label={ariaLabel ?? (isHidden ? 'Hidden card' : `${rank} of ${suit}`)}
       className={baseClasses}
     >

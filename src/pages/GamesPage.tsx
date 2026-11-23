@@ -84,7 +84,7 @@ export function GamesPage() {
             </span>
           </div>
           <p className="text-sm text-slate-400">
-            Choisissez une table, invitez un rival et fixez une mise à la Banque des 6 Lances (ou jouez à 0 ¥).
+            Choisissez une table, invitez un rival et fixez une mise en ¥ via la Trésorerie ENGEI (ou jouez à 0 ¥).
           </p>
         </div>
 

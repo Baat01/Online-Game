@@ -10,6 +10,7 @@ import { Spinner } from '@/components/ui/Spinner'
 import { friendKeys } from '@/hooks/useFriends'
 import { lobbyKeys } from '@/hooks/useLobby'
 import { useSelfPresence } from '@/hooks/useSelfPresence'
+import { GlobalInvitationPopup } from '@/components/lobby/GlobalInvitationPopup'
 import { formatYen, DEFAULT_YEN_BALANCE } from '@/services/wallet/walletService'
 import type { FriendRequest } from '@/types/friends'
 import type { GameInvitation } from '@/types/lobby'
@@ -127,10 +128,10 @@ export function RootLayout() {
             ) : user ? (
               /* Logged-in user chip — clicking goes to /profile */
               <div className="flex items-center gap-2">
-                {/* Banque des 6 Lances Yen Wallet */}
+                {/* Trésorerie ENGEI Yen Wallet */}
                 <NavLink
                   to="/profile"
-                  title="Banque des 6 Lances — Voir mon solde et mes cartes"
+                  title="Trésorerie ENGEI — Voir mon solde et mes cartes"
                   className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-btn bg-gold-500/10 border border-gold-500/30 text-gold-300 text-xs font-mono font-semibold no-underline hover:border-gold-400/60 transition-colors"
                 >
                   <Coins className="size-3.5 text-gold-400" aria-hidden="true" />
@@ -256,9 +257,12 @@ export function RootLayout() {
         <Outlet />
       </main>
 
+      {/* ── Global Real-Time Game Invitation Pop-Up ── */}
+      <GlobalInvitationPopup />
+
       {/* ── Footer ── */}
       <footer className="border-t border-surface-700 py-4 text-center text-xs text-slate-500">
-        ENGEI 宴芸 © {new Date().getFullYear()} — Cercle Bami &amp; Banque des 6 Lances
+        ENGEI 宴芸 © {new Date().getFullYear()} — Cercle Bami &amp; Trésorerie ENGEI
       </footer>
     </div>
   )

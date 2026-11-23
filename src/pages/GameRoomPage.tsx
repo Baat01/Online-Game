@@ -251,7 +251,7 @@ export function GameRoomPage() {
       {/* Lobby section (waiting / ready) */}
       {!isPlaying && !isFinished && (
         <>
-          {/* Mise en Yen (¥) — Banque des 6 Lances */}
+          {/* Mise en Yen (¥) — Trésorerie ENGEI */}
           <section
             aria-labelledby="stake-heading"
             className="rounded-card bg-surface-800 border border-gold-500/25 p-4 space-y-3"
@@ -260,7 +260,7 @@ export function GameRoomPage() {
               <div className="flex items-center gap-2">
                 <Coins className="size-4 text-gold-400" aria-hidden="true" />
                 <h2 id="stake-heading" className="text-sm font-bold text-slate-100">
-                  Mise en ¥ — Banque des 6 Lances
+                  Mise en ¥ — Trésorerie ENGEI
                 </h2>
               </div>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-gold-500/15 border border-gold-500/35 text-gold-300">

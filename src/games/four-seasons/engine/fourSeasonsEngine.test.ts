@@ -3,6 +3,7 @@ import { createSeededRng } from '../../_shared/randomUtils'
 import type { Card } from '../../_shared/deck'
 import {
   dealInitialHands,
+  getNextSeason,
   canPlayCard,
   validateMove,
   applyEffect,
@@ -21,13 +22,21 @@ describe('Four Seasons Engine', () => {
     expect(state.activeSeason).toBe(state.discardPile[0].suit)
   })
 
-  test('canPlayCard enforces full seasonal order cycle, King override, and face-card finish ban', () => {
-    // Spring (hearts) -> Summer (diamonds) -> Autumn (spades) -> Winter (clubs) -> Spring (hearts)
-    expect(canPlayCard({ id: 'h2', suit: 'hearts', rank: '2' }, 'hearts', false)).toBe(true)
-    expect(canPlayCard({ id: 'd3', suit: 'diamonds', rank: '3' }, 'hearts', false)).toBe(true)
-    expect(canPlayCard({ id: 's4', suit: 'spades', rank: '4' }, 'hearts', false)).toBe(false)
+  test('canPlayCard enforces STRICT next-season rule, King override, and face-card finish ban', () => {
+    expect(getNextSeason('hearts')).toBe('diamonds')
+    expect(getNextSeason('diamonds')).toBe('spades')
+    expect(getNextSeason('spades')).toBe('clubs')
+    expect(getNextSeason('clubs')).toBe('hearts')
 
+    // Spring (hearts) active -> ONLY Summer (diamonds) is allowed; Hearts (current) is DISALLOWED
+    expect(canPlayCard({ id: 'd3', suit: 'diamonds', rank: '3' }, 'hearts', false)).toBe(true)
+    expect(canPlayCard({ id: 'h2', suit: 'hearts', rank: '2' }, 'hearts', false)).toBe(false)
+    expect(canPlayCard({ id: 's4', suit: 'spades', rank: '4' }, 'hearts', false)).toBe(false)
+    expect(canPlayCard({ id: 'c4', suit: 'clubs', rank: '4' }, 'hearts', false)).toBe(false)
+
+    // Rest of cycle
     expect(canPlayCard({ id: 's5', suit: 'spades', rank: '5' }, 'diamonds', false)).toBe(true)
+    expect(canPlayCard({ id: 'd5', suit: 'diamonds', rank: '5' }, 'diamonds', false)).toBe(false)
     expect(canPlayCard({ id: 'c6', suit: 'clubs', rank: '6' }, 'spades', false)).toBe(true)
     expect(canPlayCard({ id: 'h7', suit: 'hearts', rank: '7' }, 'clubs', false)).toBe(true)
 
@@ -35,23 +44,25 @@ describe('Four Seasons Engine', () => {
     expect(canPlayCard({ id: 'cK', suit: 'clubs', rank: 'K' }, 'hearts', false)).toBe(true)
 
     // Cannot end game with J, Q, or K
-    expect(canPlayCard({ id: 'hJ', suit: 'hearts', rank: 'J' }, 'hearts', true)).toBe(false)
-    expect(canPlayCard({ id: 'hQ', suit: 'hearts', rank: 'Q' }, 'hearts', true)).toBe(false)
-    expect(canPlayCard({ id: 'hK', suit: 'hearts', rank: 'K' }, 'hearts', true)).toBe(false)
-    expect(canPlayCard({ id: 'h8', suit: 'hearts', rank: '8' }, 'hearts', true)).toBe(true)
+    expect(canPlayCard({ id: 'dJ', suit: 'diamonds', rank: 'J' }, 'hearts', true)).toBe(false)
+    expect(canPlayCard({ id: 'dQ', suit: 'diamonds', rank: 'Q' }, 'hearts', true)).toBe(false)
+    expect(canPlayCard({ id: 'dK', suit: 'diamonds', rank: 'K' }, 'hearts', true)).toBe(false)
+    expect(canPlayCard({ id: 'd8', suit: 'diamonds', rank: '8' }, 'hearts', true)).toBe(true)
   })
 
-  test('validateMove checks status, turn, card ownership, and legality', () => {
+  test('validateMove checks status, turn, card ownership, and strict next-season legality', () => {
     const state = dealInitialHands(['p1', 'p2'], 'p1', createSeededRng('fs-val'))
     state.activeSeason = 'hearts'
     state.playersRecord['p1'].hand = [
       { id: 'd5', suit: 'diamonds', rank: '5' },
+      { id: 'h5', suit: 'hearts', rank: '5' },
       { id: 'c5', suit: 'clubs', rank: '5' },
     ]
 
     expect(validateMove(state, 'p1')).toBe(true)
     expect(validateMove(state, 'p2')).toBe(false)
     expect(validateMove(state, 'p1', 'd5')).toBe(true)
+    expect(validateMove(state, 'p1', 'h5')).toBe(false)
     expect(validateMove(state, 'p1', 'c5')).toBe(false)
     expect(validateMove(state, 'p1', 'nonexistent')).toBe(false)
   })
@@ -74,19 +85,19 @@ describe('Four Seasons Engine', () => {
     state.activeSeason = 'hearts'
     state.playersRecord['p1'].hand = [
       { id: 'dQ', suit: 'diamonds', rank: 'Q' },
-      { id: 'dJ', suit: 'diamonds', rank: 'J' },
-      { id: 's5', suit: 'spades', rank: '5' },
+      { id: 'sJ', suit: 'spades', rank: 'J' },
+      { id: 'c5', suit: 'clubs', rank: '5' },
     ]
     state.playersRecord['p2'].hand = [{ id: 's7', suit: 'spades', rank: '7' }]
 
-    // Queen skips p2 -> p1 keeps turn
+    // Queen of diamonds (next after hearts) skips p2 -> p1 keeps turn, activeSeason becomes diamonds
     state = playCard(state, 'p1', 'dQ')
     expect(state.currentTurnUserId).toBe('p1')
     expect(state.activeSeason).toBe('diamonds')
 
-    // Jack forces both to draw 1 and advances turn to p2
+    // Jack of spades (next after diamonds) forces both to draw 1 and advances turn to p2
     const deckBefore = state.deck.length
-    state = playCard(state, 'p1', 'dJ')
+    state = playCard(state, 'p1', 'sJ')
     expect(state.playersRecord['p1'].hand).toHaveLength(2) // 2 - 1 + 1
     expect(state.playersRecord['p2'].hand).toHaveLength(2) // 1 + 1
     expect(state.deck).toHaveLength(deckBefore - 2)

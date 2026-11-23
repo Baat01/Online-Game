@@ -17,7 +17,7 @@ const features = [
   {
     icon: Spade,
     title: 'Cartes & Prestige',
-    description: 'Personnalisez votre recto et verso, misez à la Banque des 6 Lances et jouez en temps réel.',
+    description: 'Personnalisez votre recto, verso, dés et pièces, misez à la Trésorerie ENGEI et jouez en temps réel.',
   },
 ]
 
@@ -51,7 +51,7 @@ export function HomePage() {
 
           <p className="text-lg text-slate-400 leading-relaxed">
             Bienvenue dans le district souterrain fondé par la famille Jabami et régi par les clans
-            Bami. Ouvrez une table privée, engagez vos ¥ à la Banque des 6 Lances et défiez vos adversaires.
+            Bami. Ouvrez une table privée, engagez vos ¥ à la Trésorerie ENGEI et défiez vos adversaires.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">

@@ -16,7 +16,16 @@ import {
   swapPlayerRoles,
 } from '../turnHelpers'
 import { createStandardDeck, shuffleDeck, drawCards } from '../deck'
-import { CARD_THEMES, CARD_THEME_LIST, useCardThemeStore } from '../themes'
+import {
+  CARD_THEMES,
+  CARD_THEME_LIST,
+  DICE_THEME_LIST,
+  COIN_THEME_LIST,
+  UNDERTALE_TAROT_ARCANA,
+  getTarotArcanaForCard,
+  isThemeUnlocked,
+  useCardThemeStore,
+} from '../themes'
 
 describe('randomUtils', () => {
   it('createSeededRng is deterministic for string and numeric seeds', () => {
@@ -116,20 +125,50 @@ describe('deck & cardThemes', () => {
     expect(remaining).toHaveLength(48)
   })
 
-  it('exposes all 4 required card themes and persists theme selection', () => {
+  it('exposes all card, dice, coin, and Undertale Tarot themes with unlock checks', () => {
     expect(CARD_THEME_LIST.map((t) => t.id)).toEqual([
       'classic',
       'midnight-neon',
       'royal-fantasy',
       'minimalist',
+      'undertale-tarot',
     ])
-    expect(CARD_THEMES['midnight-neon'].name).toBe('Midnight Neon')
+    expect(CARD_THEMES['midnight-neon'].name).toBe('Cyber Tokyo')
+    expect(DICE_THEME_LIST).toHaveLength(5)
+    expect(COIN_THEME_LIST).toHaveLength(5)
+    expect(UNDERTALE_TAROT_ARCANA).toHaveLength(22)
+    expect(UNDERTALE_TAROT_ARCANA[0].name).toBe('Human')
+    expect(UNDERTALE_TAROT_ARCANA[20].name).toBe('Sans')
+    expect(UNDERTALE_TAROT_ARCANA[21].name).toBe('Mt. Ebott')
+
+    const arcana = getTarotArcanaForCard('hearts', 'A')
+    expect(arcana.number).toBe(0)
+    expect(arcana.imagePath).toBe('/themes/undertale-tarot/0.jpg')
+
+    expect(isThemeUnlocked('classic', true, { is_admin: false, unlocked_themes: [] })).toBe(true)
+    expect(isThemeUnlocked('undertale-tarot', false, { is_admin: false, unlocked_themes: [] })).toBe(
+      false,
+    )
+    expect(
+      isThemeUnlocked('undertale-tarot', false, {
+        is_admin: false,
+        unlocked_themes: ['undertale-tarot'],
+      }),
+    ).toBe(true)
+    expect(isThemeUnlocked('undertale-tarot', false, { is_admin: true, unlocked_themes: [] })).toBe(
+      true,
+    )
 
     useCardThemeStore.getState().setThemeId('classic')
     expect(useCardThemeStore.getState().themeId).toBe('classic')
 
     useCardThemeStore.getState().setThemeId('royal-fantasy')
     expect(useCardThemeStore.getState().themeId).toBe('royal-fantasy')
+
+    useCardThemeStore.getState().setDiceThemeId('astral-crystal')
+    useCardThemeStore.getState().setCoinThemeId('railgun-coin')
+    expect(useCardThemeStore.getState().diceThemeId).toBe('astral-crystal')
+    expect(useCardThemeStore.getState().coinThemeId).toBe('railgun-coin')
   })
 })
 

@@ -134,6 +134,7 @@ export function useInvites() {
         if (old.some((i) => i.id === invite.id)) return old
         return [invite, ...old]
       })
+      void queryClient.invalidateQueries({ queryKey: key })
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, queryClient])

@@ -3,7 +3,7 @@ import { clsx } from 'clsx'
 import { Button } from '@/components/ui/Button'
 import { CardThemeSelector } from '../../_shared/components'
 import type { Suit } from '../../_shared/deck'
-import { SEASON_META, type FourSeasonsState } from '../engine/fourSeasonsEngine'
+import { SEASON_META, getNextSeason, type FourSeasonsState } from '../engine/fourSeasonsEngine'
 
 interface GameStatusProps {
   gameState: FourSeasonsState
@@ -21,6 +21,8 @@ export function GameStatus({
   onBackToLobby,
 }: GameStatusProps) {
   const activeMeta = SEASON_META[gameState.activeSeason]
+  const expectedSuit = getNextSeason(gameState.activeSeason)
+  const expectedMeta = SEASON_META[expectedSuit]
   const turnText =
     gameState.status === 'finished'
       ? 'Match Finished'
@@ -40,7 +42,11 @@ export function GameStatus({
             <span className="text-emerald-300 font-medium">{turnText}</span>
             {' · '}
             <span>
-              Season: {activeMeta.emoji} {activeMeta.name}
+              Actuelle : {activeMeta.emoji} {activeMeta.name}
+            </span>
+            {' · '}
+            <span className="text-gold-300 font-semibold">
+              Attendue : {expectedMeta.emoji} {expectedMeta.name}
             </span>
           </p>
         </div>

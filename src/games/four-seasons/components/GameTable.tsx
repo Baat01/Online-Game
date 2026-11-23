@@ -68,10 +68,16 @@ export function GameTable({
         <div className="text-center space-y-1.5">
           <div className="flex flex-wrap items-center justify-center gap-2">
             <div
-              className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full border text-sm font-bold ${activeMeta.badgeClass}`}
+              className={`inline-flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-semibold ${activeMeta.badgeClass}`}
             >
               <span>{activeMeta.emoji}</span>
-              <span>Active Season: {activeMeta.name}</span>
+              <span>Saison actuelle : {activeMeta.name}</span>
+            </div>
+            <div
+              className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full border text-sm font-bold ring-1 ring-gold-400/40 ${nextMeta.badgeClass}`}
+            >
+              <span>{nextMeta.emoji}</span>
+              <span>Attendue (suivante) : {nextMeta.name}</span>
             </div>
             {potYen > 0 && (
               <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-gold-500/15 border border-gold-500/35 text-gold-300 font-mono text-xs font-semibold">
@@ -81,8 +87,8 @@ export function GameTable({
             )}
           </div>
           <p className="text-xs text-slate-400">
-            Play <strong>{activeMeta.name}</strong> ({activeMeta.emoji}),{' '}
-            <strong>{nextMeta.name}</strong> ({nextMeta.emoji}), or any <strong>King</strong>
+            Jouez uniquement <strong>{nextMeta.name}</strong> ({nextMeta.emoji}) ou un{' '}
+            <strong>Roi (K)</strong> — pas la saison actuelle ({activeMeta.name})
           </p>
         </div>
 

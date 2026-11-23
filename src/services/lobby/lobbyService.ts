@@ -59,6 +59,9 @@ function toRoomPlayer(row: {
     clan_title?: string | null
     card_back_theme?: string
     card_front_theme?: string
+    dice_theme?: string
+    coin_theme?: string
+    unlocked_themes?: string[]
   } | null
 }): RoomPlayer {
   return {
@@ -189,7 +192,10 @@ export async function getRoom(roomId: string): Promise<GameRoom> {
         is_admin,
         clan_title,
         card_back_theme,
-        card_front_theme
+        card_front_theme,
+        dice_theme,
+        coin_theme,
+        unlocked_themes
       )
     `)
     .eq('room_id', roomId)
@@ -369,7 +375,7 @@ export async function getInvites(): Promise<GameInvitation[]> {
       created_at,
       expires_at,
       sender_profile:profiles!game_invitations_sender_id_fkey (
-        id, username, display_name, avatar_url
+        id, username, display_name, avatar_url, clan_title
       )
     `)
     .eq('receiver_id', user.id)

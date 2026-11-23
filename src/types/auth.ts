@@ -27,6 +27,9 @@ export interface Profile {
   clan_title?: string | null
   card_back_theme?: string
   card_front_theme?: string
+  dice_theme?: string
+  coin_theme?: string
+  unlocked_themes?: string[]
 }
 
 /** Shape of the public.presence row */

@@ -94,6 +94,10 @@ export function dealInitialHands(
   }
 }
 
+export function getNextSeason(activeSeason: Suit): Suit {
+  return SEASON_ORDER[activeSeason]
+}
+
 export function canPlayCard(card: Card, activeSeason: Suit, isLastCard: boolean): boolean {
   // Cannot end game with a face card (Jack, Queen, King)
   if (isLastCard && isFaceCard(card)) {
@@ -103,8 +107,8 @@ export function canPlayCard(card: Card, activeSeason: Suit, isLastCard: boolean)
   // King overrides suit constraint
   if (card.rank === 'K') return true
 
-  // Follow seasonal order (current season or advancing to the next season)
-  return card.suit === SEASON_ORDER[activeSeason] || card.suit === activeSeason
+  // Strict seasonal progression: ONLY the NEXT season after activeSeason is allowed
+  return card.suit === getNextSeason(activeSeason)
 }
 
 export function validateMove(

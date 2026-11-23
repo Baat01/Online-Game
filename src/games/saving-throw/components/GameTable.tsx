@@ -1,4 +1,5 @@
 import { AnimatedCoinFlip } from '../../_shared/components'
+import type { PlayerCardThemeSelection } from '../../_shared/useGenericGame'
 import { formatYen } from '@/services/wallet/walletService'
 import type { SavingThrowPlayer, SavingThrowState } from '../engine/savingThrowEngine'
 import { PlayerArea } from './PlayerArea'
@@ -7,6 +8,7 @@ interface GameTableProps {
   gameState: SavingThrowState
   currentUserId?: string
   playerProfiles: Record<string, { displayName: string }>
+  playerThemes?: Record<string, PlayerCardThemeSelection>
   potYen?: number
 }
 
@@ -14,11 +16,15 @@ export function GameTable({
   gameState,
   currentUserId,
   playerProfiles,
+  playerThemes = {},
   potYen = 0,
 }: GameTableProps) {
   const players = Object.values(gameState.playersRecord) as SavingThrowPlayer[]
   const firstPlayer = players.find((p) => p.role === 'first')
   const targetToBeat = firstPlayer?.finalScore ?? null
+  const challengerCoinThemeId = gameState.challengerId
+    ? playerThemes[gameState.challengerId]?.coinThemeId
+    : undefined
 
   if (gameState.status === 'waiting' || gameState.tiebreakerActive) {
     const challengerName =
@@ -40,6 +46,7 @@ export function GameTable({
           <AnimatedCoinFlip
             choice={gameState.coinChoice}
             result={gameState.coinResult}
+            coinThemeId={challengerCoinThemeId}
             label={
               gameState.challengerId === currentUserId
                 ? 'Choose Heads or Tails below'
@@ -70,6 +77,7 @@ export function GameTable({
             <AnimatedCoinFlip
               choice={gameState.coinChoice}
               result={gameState.coinResult}
+              coinThemeId={challengerCoinThemeId}
               label="Deciding coin flip"
             />
           )}
@@ -101,6 +109,7 @@ export function GameTable({
               gameState.roundWinnerId === p.userId
             }
             targetToBeat={p.role === 'second' ? targetToBeat : null}
+            diceThemeId={playerThemes[p.userId]?.diceThemeId}
           />
         ))}
       </div>
