@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { BookOpen, ChevronDown, ChevronUp, Moon } from 'lucide-react'
+import { BookOpen, ChevronDown, ChevronUp, Sparkles } from 'lucide-react'
 import { ALL_UNDERTALE_TAROT_ARCANA } from '@/games/_shared/themes/undertaleTarot'
 import type { PlayerCardThemeSelection } from '@/games/_shared/useGenericGame'
-import type { Arcane23State } from '../engine/arcane23Engine'
+import { getArcanaRuleSpec, type Arcane23State } from '../engine/arcane23Engine'
 import { PlayerArea } from './PlayerArea'
+import type { InspectedTarotInfo } from './TarotDetailModal'
 
 interface GameTableProps {
   gameState: Arcane23State
@@ -12,10 +13,12 @@ interface GameTableProps {
     string,
     {
       displayName: string
+      avatarUrl?: string | null
       clanTitle?: string | null
     }
   >
   playerThemes: Record<string, PlayerCardThemeSelection>
+  onInspectTarot: (info: InspectedTarotInfo) => void
 }
 
 export function GameTable({
@@ -23,6 +26,7 @@ export function GameTable({
   currentUserId,
   playerProfiles,
   playerThemes,
+  onInspectTarot,
 }: GameTableProps) {
   const [showCodex, setShowCodex] = useState(false)
 
@@ -36,23 +40,6 @@ export function GameTable({
 
   return (
     <main className="flex-1 w-full max-w-6xl mx-auto px-4 py-6 flex flex-col gap-5">
-      {/* Delayed reveal banner from previous Moon round */}
-      {gameState.lastRevealedMoonOutcome && (
-        <div className="rounded-xl bg-indigo-950/60 border border-indigo-400/50 px-4 py-2.5 flex items-center gap-3 text-xs text-indigo-100">
-          <Moon className="size-4 text-indigo-300 shrink-0" />
-          <div>
-            <span className="font-bold">
-              Révélation différée (Manche {gameState.lastRevealedMoonOutcome.roundNumber}) :
-            </span>{' '}
-            {gameState.lastRevealedMoonOutcome.summary} —{' '}
-            {gameState.lastRevealedMoonOutcome.winnerId
-              ? `Vainqueur : ${playerProfiles[gameState.lastRevealedMoonOutcome.winnerId]?.displayName ?? gameState.lastRevealedMoonOutcome.winnerId}`
-              : 'Match nul'}{' '}
-            ({gameState.lastRevealedMoonOutcome.reason})
-          </div>
-        </div>
-      )}
-
       {/* Arena: Opponent Seat & Self Seat */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-stretch">
         {opponentId && gameState.playersRecord[opponentId] && (
@@ -60,12 +47,12 @@ export function GameTable({
             gameState={gameState}
             playerState={gameState.playersRecord[opponentId]}
             displayName={playerProfiles[opponentId]?.displayName ?? 'Adversaire'}
+            avatarUrl={playerProfiles[opponentId]?.avatarUrl}
             clanTitle={playerProfiles[opponentId]?.clanTitle}
             isSelf={opponentId === currentUserId}
-            isWinner={
-              gameState.roundOutcome?.winnerId === opponentId && !gameState.roundOutcome.hiddenByMoon
-            }
+            isWinner={gameState.roundOutcome?.winnerId === opponentId}
             themes={playerThemes[opponentId]}
+            onInspectTarot={onInspectTarot}
           />
         )}
 
@@ -74,18 +61,46 @@ export function GameTable({
             gameState={gameState}
             playerState={gameState.playersRecord[selfId]}
             displayName={playerProfiles[selfId]?.displayName ?? 'Vous'}
+            avatarUrl={playerProfiles[selfId]?.avatarUrl}
             clanTitle={playerProfiles[selfId]?.clanTitle}
             isSelf={selfId === currentUserId}
-            isWinner={
-              gameState.roundOutcome?.winnerId === selfId && !gameState.roundOutcome.hiddenByMoon
-            }
+            isWinner={gameState.roundOutcome?.winnerId === selfId}
             themes={playerThemes[selfId]}
+            onInspectTarot={onInspectTarot}
           />
         )}
       </div>
 
-      {/* Recent Log + Collapsible Arcana Codex */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* Clickable Tarot Discard Strip */}
+      {gameState.tarotDiscard.length > 0 && (
+        <div
+          className="rounded-xl bg-surface-900/75 border border-purple-500/25 p-3 flex flex-wrap items-center gap-2"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-purple-300">
+            <Sparkles className="size-3.5" /> Défausse Tarot (cliquer pour lire) :
+          </span>
+          {gameState.tarotDiscard.map((num, idx) => {
+            const spec = getArcanaRuleSpec(num)
+            return (
+              <button
+                key={`${num}-${idx}`}
+                type="button"
+                onClick={() => onInspectTarot({ arcanumNumber: num })}
+                className="px-2 py-0.5 rounded bg-surface-950 border border-purple-400/35 hover:border-gold-400 text-[11px] text-gold-300 cursor-pointer"
+              >
+                {spec.roman}. {spec.title}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Recent Log + Collapsible Clickable Arcana Codex */}
+      <div
+        className="grid grid-cols-1 lg:grid-cols-2 gap-4"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="rounded-xl bg-surface-900/75 border border-surface-800 p-3">
           <p className="text-[11px] font-bold uppercase tracking-wider text-gold-400 mb-1.5">
             Chronique des Arcanes
@@ -112,17 +127,22 @@ export function GameTable({
           </button>
           {showCodex && (
             <div className="mt-2.5 max-h-44 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px] text-slate-300">
-              {ALL_UNDERTALE_TAROT_ARCANA.map((arc) => (
-                <div
-                  key={arc.number}
-                  className="px-2 py-1 rounded bg-surface-950/70 border border-surface-800"
-                >
-                  <span className="font-bold text-gold-300">
-                    {arc.roman}. {arc.name}
-                  </span>{' '}
-                  <span className="text-slate-400">({arc.arcanaTitle})</span>
-                </div>
-              ))}
+              {ALL_UNDERTALE_TAROT_ARCANA.map((arc) => {
+                const spec = getArcanaRuleSpec(arc.number)
+                return (
+                  <button
+                    key={arc.number}
+                    type="button"
+                    onClick={() => onInspectTarot({ arcanumNumber: arc.number })}
+                    className="text-left px-2 py-1 rounded bg-surface-950/70 border border-surface-800 hover:border-gold-400/50 cursor-pointer"
+                  >
+                    <span className="font-bold text-gold-300">
+                      {spec.roman}. {arc.name}
+                    </span>{' '}
+                    <span className="text-slate-400">({spec.priorityLabel})</span>
+                  </button>
+                )
+              })}
             </div>
           )}
         </div>

@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest'
 import type { Card } from '@/games/_shared/deck'
 import { createSeededRng } from '@/games/_shared/randomUtils'
 import {
+  ARCANA_RULES_CATALOG,
+  advancePresentationStep,
   advanceToNextRound,
   canPlayerChooseTarot,
   createInitialArcane23State,
   getClassicCardNumericValue,
+  getPlayerEffectiveClassicScore,
   resolveArcanePrompt,
   submitDrawChoice,
   type Arcane23State,
@@ -32,132 +35,287 @@ function setupRiggedMatch(opts?: {
   return s
 }
 
+function runStepsUntilResolved(state: Arcane23State, rng = () => 0.1): Arcane23State {
+  let s = state
+  let guard = 0
+  while (s.presentationStep !== 'RESOLVED' && guard < 6) {
+    s = advancePresentationStep(s, rng)
+    guard++
+  }
+  return s
+}
+
 describe('Le 23e Arcane Engine', () => {
-  it('initializes with two 52-card personal decks, shared 22-card Tarot deck, and 5 rounds to win', () => {
+  it('initializes with 52-card personal decks, 22-card shared Tarot deck, full catalog, and 5 rounds to win', () => {
     const state = createInitialArcane23State([P1, P2], P1, createSeededRng(1))
     expect(state.phase).toBe('CHOOSING')
-    expect(state.status).toBe('player_turns')
+    expect(state.presentationStep).toBe('CHOOSING')
     expect(state.targetRoundsToWin).toBe(5)
     expect(state.playersRecord[P1].classicDeck).toHaveLength(52)
     expect(state.playersRecord[P2].classicDeck).toHaveLength(52)
     expect(state.tarotDeck).toHaveLength(22)
-    expect(new Set(state.tarotDeck).size).toBe(22)
+    expect(Object.keys(ARCANA_RULES_CATALOG)).toHaveLength(23)
     expect(getClassicCardNumericValue(card('spades', 'A'))).toBe(14)
     expect(getClassicCardNumericValue(card('hearts', '2'))).toBe(2)
   })
 
-  it('resolves classic simultaneous draw and enforces 1-turn Tarot cooldown & deck recycling', () => {
+  it('progresses sequentially (CLASSIC_REVEAL -> TAROT_1 -> TAROT_2 -> RESOLVED) and enforces cooldown/recycling', () => {
     let s = setupRiggedMatch({
       p1Deck: [card('hearts', 'K')],
       p2Deck: [card('spades', '9')],
-      tarotDeck: [21, 5],
+      tarotDeck: [8, 3],
     })
     s.playersRecord[P1].classicDiscard = [card('clubs', 'Q')]
 
     s = submitDrawChoice(s, P1, 'classic')
-    expect(s.phase).toBe('CHOOSING')
     s = submitDrawChoice(s, P2, 'classic')
-    expect(s.phase).toBe('ROUND_END')
+    expect(s.presentationStep).toBe('CLASSIC_REVEAL')
+
+    s = advancePresentationStep(s)
+    expect(s.presentationStep).toBe('RESOLVED')
     expect(s.roundOutcome?.winnerId).toBe(P1)
     expect(s.playersRecord[P1].score).toBe(1)
 
-    // Advance & verify P1 recycles classicDiscard when classicDeck is empty, while P2 draws Tarot
     s = advanceToNextRound(s)
-    s = submitDrawChoice(s, P1, 'classic')
+    s = submitDrawChoice(s, P1, 'tarot')
     s = submitDrawChoice(s, P2, 'tarot', { rng: () => 0.1 })
-    if (s.phase === 'ROUND_END') {
-      s = advanceToNextRound(s)
-    }
-    expect(s.playersRecord[P2].tarotCooldown).toBe(true)
+    expect(s.presentationStep).toBe('CLASSIC_REVEAL')
+    s = advancePresentationStep(s, () => 0.1)
+    expect(s.presentationStep).toBe('TAROT_1')
+    s = advancePresentationStep(s, () => 0.1)
+    expect(s.presentationStep).toBe('TAROT_2')
+    s = advancePresentationStep(s, () => 0.1)
+    expect(s.presentationStep).toBe('RESOLVED')
+
+    s = advanceToNextRound(s)
+    expect(canPlayerChooseTarot(s, P1)).toBe(false)
     expect(canPlayerChooseTarot(s, P2)).toBe(false)
-    expect(canPlayerChooseTarot(s, P1)).toBe(true)
   })
 
-  it('Priority 0: triggers 666. Gaster on 3d10 (6-6-6) anomaly and overrides all effects', () => {
-    let s = setupRiggedMatch({
-      p1Deck: [card('hearts', '2')],
-      p2Deck: [card('spades', 'A')],
-      tarotDeck: [5, 19],
-    })
-    s = submitDrawChoice(s, P1, 'tarot')
-    s = submitDrawChoice(s, P2, 'classic', { forceGasterRoll: [6, 6, 6] })
-
-    expect(s.playersRecord[P1].drawnTarot).toBe(666)
-    expect(s.phase).toBe('INTERACTION')
-    expect(s.pendingPrompts[0]?.type).toBe('GASTER_CHOOSE_WINNER')
-
-    s = resolveArcanePrompt(s, P1, {
+  it('Priority 0 & 1: 666. Gaster crowns match winner immediately; XIII. Death loses match immediately', () => {
+    let sGaster = setupRiggedMatch({ tarotDeck: [5] })
+    sGaster = submitDrawChoice(sGaster, P1, 'tarot')
+    sGaster = submitDrawChoice(sGaster, P2, 'classic', { forceGasterRoll: [6, 6, 6] })
+    sGaster = advancePresentationStep(sGaster)
+    expect(sGaster.pendingPrompts[0]?.type).toBe('GASTER_CHOOSE_WINNER')
+    sGaster = resolveArcanePrompt(sGaster, P1, {
       type: 'GASTER_CHOOSE_WINNER',
       chosenWinnerId: P1,
     })
-    expect(s.roundOutcome?.usedGaster).toBe(true)
-    expect(s.roundOutcome?.winnerId).toBe(P1)
-    expect(s.playersRecord[P1].score).toBe(1)
-  })
+    expect(sGaster.status).toBe('finished')
+    expect(sGaster.winnerId).toBe(P1)
 
-  it('Priority 1: XVI. La Maison Dieu purges persistent effects and forces pure classic duel', () => {
-    let s = setupRiggedMatch({
-      p1Deck: [card('hearts', 'K')],
-      p2Deck: [card('clubs', '4')],
-      tarotDeck: [16, 10], // Maison Dieu vs La Roue
-    })
-    s.activePersistentArcana.sun = true
-    s.activePersistentArcana.moon = true
-    s.activePersistentArcana.suddenDeath = true
-    s.targetRoundsToWin = 1
-
-    s = submitDrawChoice(s, P1, 'tarot')
-    s = submitDrawChoice(s, P2, 'tarot', { rng: () => 0.1 })
-
-    expect(s.activePersistentArcana.sun).toBe(false)
-    expect(s.activePersistentArcana.moon).toBe(false)
-    expect(s.activePersistentArcana.suddenDeath).toBe(false)
-    expect(s.targetRoundsToWin).toBe(5)
-    // Pure standard comparison: K(13) > 4(4)
-    expect(s.roundOutcome?.winnerId).toBe(P1)
-  })
-
-  it('Priority 2: 0. Le Mat cancels round & waives cooldown; XIV. Tempérance equalizes; both trigger Mort Subite', () => {
-    // Le Mat alone
-    let sMat = setupRiggedMatch({ tarotDeck: [0] })
-    sMat = submitDrawChoice(sMat, P1, 'tarot')
-    sMat = submitDrawChoice(sMat, P2, 'classic', { rng: () => 0.1 })
-    expect(sMat.roundOutcome?.cancelled).toBe(true)
-    sMat = advanceToNextRound(sMat)
-    expect(canPlayerChooseTarot(sMat, P1)).toBe(true)
-
-    // Tempérance alone
-    let sTemp = setupRiggedMatch({ tarotDeck: [14] })
-    sTemp.playersRecord[P1].score = 1
-    sTemp.playersRecord[P2].score = 4
-    sTemp = submitDrawChoice(sTemp, P1, 'tarot')
-    sTemp = submitDrawChoice(sTemp, P2, 'classic', { rng: () => 0.1 })
-    expect(sTemp.playersRecord[P1].score).toBe(4)
-
-    // Combo 0 + 14 -> Mort Subite
-    let sSudden = setupRiggedMatch({ tarotDeck: [0, 14] })
-    sSudden.playersRecord[P1].score = 3
-    sSudden.playersRecord[P2].score = 4
-    sSudden = submitDrawChoice(sSudden, P1, 'tarot')
-    sSudden = submitDrawChoice(sSudden, P2, 'tarot', { rng: () => 0.1 })
-    expect(sSudden.activePersistentArcana.suddenDeath).toBe(true)
-    expect(sSudden.targetRoundsToWin).toBe(1)
-    expect(sSudden.playersRecord[P1].score).toBe(0)
-    expect(sSudden.playersRecord[P2].score).toBe(0)
-  })
-
-  it('Priority 3: XIII. La Mort reshuffles all piles and XII. Le Pendu swaps drawn cards', () => {
-    let sDeath = setupRiggedMatch({
-      p1Deck: [card('hearts', 'Q')],
-      p2Deck: [card('spades', '8')],
-      tarotDeck: [13],
-      tarotDiscard: [1, 2, 3],
-    })
-    sDeath.playersRecord[P1].classicDiscard = [card('clubs', 'A')]
+    let sDeath = setupRiggedMatch({ tarotDeck: [13] })
     sDeath = submitDrawChoice(sDeath, P1, 'tarot')
     sDeath = submitDrawChoice(sDeath, P2, 'classic', { rng: () => 0.1 })
-    expect(sDeath.tarotDiscard).toHaveLength(0)
-    expect(sDeath.playersRecord[P1].classicDiscard).toHaveLength(0)
+    sDeath = advancePresentationStep(sDeath, () => 0.1)
+    expect(sDeath.status).toBe('finished')
+    expect(sDeath.winnerId).toBe(P2)
+  })
+
+  it('Priority 2: XV. Le Diable cancels round, enables Mort Subite, and resets Tarot cooldown for BOTH players', () => {
+    let s = setupRiggedMatch({
+      p1Deck: [card('spades', 'A')],
+      p2Deck: [card('clubs', 'A'), card('diamonds', '3')],
+      tarotDeck: [15, 3],
+    })
+    s.playersRecord[P2].tarotCooldown = true
+
+    s = submitDrawChoice(s, P1, 'tarot')
+    s = submitDrawChoice(s, P2, 'classic', { rng: () => 0.1 })
+    s = runStepsUntilResolved(s)
+
+    expect(s.roundOutcome?.cancelled).toBe(true)
+    expect(s.activePersistentArcana.suddenDeath).toBe(true)
+
+    s = advanceToNextRound(s)
+    expect(s.playersRecord[P1].tarotCooldown).toBe(false)
+    expect(s.playersRecord[P2].tarotCooldown).toBe(false)
+    expect(canPlayerChooseTarot(s, P1)).toBe(true)
+    expect(canPlayerChooseTarot(s, P2)).toBe(true)
+
+    s = submitDrawChoice(s, P1, 'classic')
+    s = submitDrawChoice(s, P2, 'classic')
+    s = runStepsUntilResolved(s)
+    expect(s.status).toBe('finished')
+    expect(s.winnerId).toBe(P1)
+  })
+
+  it('Priority 3 & 4: XXI. Le Monde wins round + reshuffles discards; 0. Le Mat inverts hierarchy (2 > A)', () => {
+    let sWorld = setupRiggedMatch({
+      p1Deck: [card('hearts', '2')],
+      p2Deck: [card('spades', 'A')],
+      tarotDeck: [21],
+      tarotDiscard: [5, 6],
+    })
+    sWorld.playersRecord[P1].classicDiscard = [card('clubs', '9')]
+    sWorld = submitDrawChoice(sWorld, P1, 'tarot')
+    sWorld = submitDrawChoice(sWorld, P2, 'classic', { rng: () => 0.1 })
+    sWorld = runStepsUntilResolved(sWorld)
+    expect(sWorld.roundOutcome?.winnerId).toBe(P1)
+    expect(sWorld.playersRecord[P1].classicDiscard).toHaveLength(0)
+    expect(sWorld.tarotDiscard).toHaveLength(0)
+
+    let sMat = setupRiggedMatch({
+      p1Deck: [card('hearts', '2')],
+      p2Deck: [card('spades', 'A')],
+      tarotDeck: [0],
+    })
+    sMat = submitDrawChoice(sMat, P1, 'tarot')
+    sMat = submitDrawChoice(sMat, P2, 'classic', { rng: () => 0.1 })
+    sMat = runStepsUntilResolved(sMat)
+    expect(sMat.roundOutcome?.winnerId).toBe(P1)
+  })
+
+  it('Priority 5 & 6: V. Le Pape (+1 each), X. La Roue (+2), XIV. Tempérance (average + Le Mat flip), III. Impératrice (+2)', () => {
+    let sPape = setupRiggedMatch({ tarotDeck: [5, 0] })
+    sPape = submitDrawChoice(sPape, P1, 'tarot')
+    sPape = submitDrawChoice(sPape, P2, 'tarot', { rng: () => 0.1 })
+    sPape = runStepsUntilResolved(sPape)
+    expect(sPape.playersRecord[P1].score).toBe(1)
+    expect(sPape.playersRecord[P2].score).toBe(1)
+
+    let sWheel = setupRiggedMatch({ tarotDeck: [10, 0] })
+    sWheel = submitDrawChoice(sWheel, P1, 'tarot')
+    sWheel = submitDrawChoice(sWheel, P2, 'tarot', { rng: () => 0.1 })
+    sWheel = advancePresentationStep(sWheel, () => 0.1)
+    expect(sWheel.pendingPrompts[0]?.type).toBe('WHEEL_CALL_COIN')
+    sWheel = resolveArcanePrompt(sWheel, P2, { type: 'WHEEL_CALL_COIN', call: 'heads' }, () => 0.1)
+    sWheel = runStepsUntilResolved(sWheel)
+    expect(sWheel.playersRecord[P2].score).toBe(2)
+
+    let sTempEven = setupRiggedMatch({
+      p1Deck: [card('hearts', '4')],
+      p2Deck: [card('spades', '8')],
+      tarotDeck: [14],
+    })
+    sTempEven = submitDrawChoice(sTempEven, P1, 'tarot')
+    sTempEven = submitDrawChoice(sTempEven, P2, 'classic', { rng: () => 0.1 })
+    sTempEven = runStepsUntilResolved(sTempEven)
+    expect(sTempEven.roundOutcome?.winnerId).toBe(P1)
+
+    let sTempMat = setupRiggedMatch({
+      p1Deck: [card('hearts', '4')],
+      p2Deck: [card('spades', '8')],
+      tarotDeck: [14, 0],
+    })
+    sTempMat = submitDrawChoice(sTempMat, P1, 'tarot')
+    sTempMat = submitDrawChoice(sTempMat, P2, 'tarot', { rng: () => 0.1 })
+    sTempMat = runStepsUntilResolved(sTempMat)
+    expect(sTempMat.roundOutcome?.winnerId).toBe(P2)
+
+    let sImp = setupRiggedMatch({
+      p1Deck: [card('hearts', 'A')],
+      p2Deck: [card('clubs', '3')],
+      tarotDeck: [3],
+    })
+    sImp = submitDrawChoice(sImp, P1, 'tarot')
+    sImp = submitDrawChoice(sImp, P2, 'classic', { rng: () => 0.1 })
+    sImp = runStepsUntilResolved(sImp)
+    expect(sImp.playersRecord[P1].score).toBe(2)
+  })
+
+  it('Priority 7: VIII. La Justice equalizes leader downward; XVI. La Maison Dieu removes 2 rounds (min 0)', () => {
+    let sJust = setupRiggedMatch({
+      p1Deck: [card('hearts', '5')],
+      p2Deck: [card('clubs', '5')],
+      tarotDeck: [8],
+    })
+    sJust.playersRecord[P1].score = 4
+    sJust.playersRecord[P2].score = 1
+    sJust = submitDrawChoice(sJust, P1, 'tarot')
+    sJust = submitDrawChoice(sJust, P2, 'classic', { rng: () => 0.1 })
+    sJust = runStepsUntilResolved(sJust)
+    expect(sJust.playersRecord[P1].score).toBe(1)
+
+    let sTower = setupRiggedMatch({
+      p1Deck: [card('hearts', '5')],
+      p2Deck: [card('clubs', '5')],
+      tarotDeck: [16],
+    })
+    sTower.playersRecord[P1].score = 3
+    sTower.playersRecord[P2].score = 1
+    sTower = submitDrawChoice(sTower, P1, 'tarot')
+    sTower = submitDrawChoice(sTower, P2, 'classic', { rng: () => 0.1 })
+    sTower = runStepsUntilResolved(sTower)
+    expect(sTower.playersRecord[P1].score).toBe(1)
+    expect(sTower.playersRecord[P2].score).toBe(0)
+  })
+
+  it("Priority 8 & 9: I. Bateleur, VI. Amoureux, VII. Chariot, IX. Ermite (vs Classic & vs Tarot), XI. Force, XII. Pendu", () => {
+    let sLoveNum = setupRiggedMatch({
+      p1Deck: [card('hearts', '7'), card('diamonds', '8')],
+      p2Deck: [card('clubs', '9')],
+      tarotDeck: [6],
+    })
+    sLoveNum = submitDrawChoice(sLoveNum, P1, 'tarot')
+    sLoveNum = submitDrawChoice(sLoveNum, P2, 'classic', { rng: () => 0.1 })
+    sLoveNum = runStepsUntilResolved(sLoveNum)
+    expect(getPlayerEffectiveClassicScore(sLoveNum.playersRecord[P1])).toBe(10)
+    expect(sLoveNum.roundOutcome?.winnerId).toBe(P1)
+
+    let sLoveFig = setupRiggedMatch({
+      p1Deck: [card('hearts', '4'), card('diamonds', 'Q')],
+      p2Deck: [card('clubs', '10')],
+      tarotDeck: [6],
+    })
+    sLoveFig = submitDrawChoice(sLoveFig, P1, 'tarot')
+    sLoveFig = submitDrawChoice(sLoveFig, P2, 'classic', { rng: () => 0.1 })
+    sLoveFig = runStepsUntilResolved(sLoveFig)
+    expect(getPlayerEffectiveClassicScore(sLoveFig.playersRecord[P1])).toBe(12)
+
+    let sChar = setupRiggedMatch({
+      p1Deck: [card('hearts', '9')],
+      p2Deck: [card('clubs', 'J')],
+      tarotDeck: [7],
+    })
+    sChar.playersRecord[P1].score = 3
+    sChar = submitDrawChoice(sChar, P1, 'tarot')
+    sChar = submitDrawChoice(sChar, P2, 'classic', { rng: () => 0.1 })
+    sChar = runStepsUntilResolved(sChar)
+    expect(sChar.roundOutcome?.winnerId).toBe(P1)
+
+    // IX. L'Ermite vs Classic: observes opponent's revealed classic card & can cancel
+    let sErm = setupRiggedMatch({
+      p1Deck: [card('hearts', '2')],
+      p2Deck: [card('spades', 'A')],
+      tarotDeck: [9],
+    })
+    sErm = submitDrawChoice(sErm, P1, 'tarot')
+    sErm = submitDrawChoice(sErm, P2, 'classic', { rng: () => 0.1 })
+    sErm = advancePresentationStep(sErm, () => 0.1)
+    expect(sErm.pendingPrompts[0]?.type).toBe('ERMITE_DECIDE')
+    if (sErm.pendingPrompts[0]?.type === 'ERMITE_DECIDE') {
+      expect(sErm.pendingPrompts[0].observedOpponentCard?.rank).toBe('A')
+      expect(sErm.pendingPrompts[0].opponentChoseTarot).toBe(false)
+    }
+    sErm = resolveArcanePrompt(sErm, P1, { type: 'ERMITE_DECIDE', decision: 'cancel' })
+    sErm = runStepsUntilResolved(sErm)
+    expect(sErm.roundOutcome?.cancelled).toBe(true)
+
+    // IX. L'Ermite vs Tarot: opponent has NOT drawn classic card yet, yet Ermite STILL gets Play/Cancel prompt!
+    let sErmVsTarot = setupRiggedMatch({
+      p1Deck: [card('hearts', 'K')],
+      p2Deck: [card('spades', '2')],
+      tarotDeck: [9, 3], // P1 Hermit, P2 Empress
+    })
+    sErmVsTarot = submitDrawChoice(sErmVsTarot, P1, 'tarot')
+    sErmVsTarot = submitDrawChoice(sErmVsTarot, P2, 'tarot', { rng: () => 0.1 })
+    sErmVsTarot = advancePresentationStep(sErmVsTarot, () => 0.1) // TAROT_1 = P1 Hermit
+    expect(sErmVsTarot.presentationStep).toBe('TAROT_1')
+    expect(sErmVsTarot.pendingPrompts[0]?.type).toBe('ERMITE_DECIDE')
+    if (sErmVsTarot.pendingPrompts[0]?.type === 'ERMITE_DECIDE') {
+      expect(sErmVsTarot.pendingPrompts[0].opponentChoseTarot).toBe(true)
+      expect(sErmVsTarot.pendingPrompts[0].observedOpponentCard).toBeNull()
+    }
+    expect(sErmVsTarot.playersRecord[P2].drawnClassic).toBeNull()
+    sErmVsTarot = resolveArcanePrompt(sErmVsTarot, P1, { type: 'ERMITE_DECIDE', decision: 'play' })
+    // Still on TAROT_1, advancing shows TAROT_2 (Empress), then RESOLVED
+    sErmVsTarot = advancePresentationStep(sErmVsTarot, () => 0.1)
+    expect(sErmVsTarot.presentationStep).toBe('TAROT_2')
+    sErmVsTarot = advancePresentationStep(sErmVsTarot, () => 0.1)
+    expect(sErmVsTarot.presentationStep).toBe('RESOLVED')
+    expect(sErmVsTarot.playersRecord[P1].score).toBe(2)
 
     let sPendu = setupRiggedMatch({
       p1Deck: [card('hearts', '2')],
@@ -166,220 +324,200 @@ describe('Le 23e Arcane Engine', () => {
     })
     sPendu = submitDrawChoice(sPendu, P1, 'tarot')
     sPendu = submitDrawChoice(sPendu, P2, 'classic', { rng: () => 0.1 })
-    // P1 gets P2's Ace of Spades!
+    sPendu = runStepsUntilResolved(sPendu)
     expect(sPendu.playersRecord[P1].drawnClassic?.rank).toBe('A')
     expect(sPendu.roundOutcome?.winnerId).toBe(P1)
-  })
 
-  it("Priority 4: I. Le Bateleur picks top 3, II. La Papesse reorders opponent's deck, IX. L'Ermite peeks & cancels", () => {
-    // Le Bateleur
-    let sBat = setupRiggedMatch({
-      p1Deck: [card('clubs', '3'), card('hearts', 'A'), card('diamonds', '5'), card('spades', '2')],
-      p2Deck: [card('spades', '10')],
-      tarotDeck: [1],
-    })
-    sBat = submitDrawChoice(sBat, P1, 'tarot')
-    sBat = submitDrawChoice(sBat, P2, 'classic', { rng: () => 0.1 })
-    expect(sBat.pendingPrompts[0]?.type).toBe('BATELEUR_PICK_ORDER')
-    sBat = resolveArcanePrompt(sBat, P1, {
-      type: 'BATELEUR_PICK_ORDER',
-      chosenCardId: 'hearts-A',
-      remainingOrder: ['diamonds-5', 'clubs-3'],
-    })
-    expect(sBat.playersRecord[P1].drawnClassic?.rank).toBe('A')
-    expect(sBat.playersRecord[P1].classicDeck[0]?.id).toBe('diamonds-5')
-    expect(sBat.roundOutcome?.winnerId).toBe(P1)
-
-    // La Papesse
-    let sPap = setupRiggedMatch({
-      p1Deck: [card('hearts', 'K')],
-      p2Deck: [card('clubs', 'A'), card('spades', '4'), card('diamonds', '6'), card('hearts', '7')],
-      tarotDeck: [2],
-    })
-    sPap = submitDrawChoice(sPap, P1, 'tarot')
-    sPap = submitDrawChoice(sPap, P2, 'tarot', { rng: () => 0.1 }) // Wait if P2 draws classic, P2 already drew; let's verify reorder effect directly
-    expect(sPap.phase).toBe('INTERACTION')
-    expect(sPap.pendingPrompts[0]?.type).toBe('PAPESSE_REORDER_OPPONENT')
-
-    // L'Ermite cancel
-    let sErm = setupRiggedMatch({
-      p1Deck: [card('clubs', '2')],
-      p2Deck: [card('spades', 'A')],
-      tarotDeck: [9],
-    })
-    sErm = submitDrawChoice(sErm, P1, 'tarot')
-    sErm = submitDrawChoice(sErm, P2, 'classic', { rng: () => 0.1 })
-    expect(sErm.pendingPrompts[0]?.type).toBe('ERMITE_DECIDE')
-    sErm = resolveArcanePrompt(sErm, P1, { type: 'ERMITE_DECIDE', decision: 'cancel' })
-    expect(sErm.roundOutcome?.cancelled).toBe(true)
-    expect(sErm.playersRecord[P2].score).toBe(0)
-  })
-
-  it("Priority 5: III. L'Impératrice keeps best of 2; VII. Le Chariot sums 2 cards", () => {
-    let sImp = setupRiggedMatch({
-      p1Deck: [card('clubs', '3'), card('hearts', 'Q'), card('diamonds', '4')],
-      p2Deck: [card('spades', '9')],
-      tarotDeck: [3],
-    })
-    sImp = submitDrawChoice(sImp, P1, 'tarot')
-    sImp = submitDrawChoice(sImp, P2, 'classic', { rng: () => 0.1 })
-    expect(sImp.playersRecord[P1].drawnClassic?.rank).toBe('Q')
-    expect(sImp.roundOutcome?.winnerId).toBe(P1)
-
-    let sChar = setupRiggedMatch({
-      p1Deck: [card('clubs', '8'), card('hearts', '9')],
-      p2Deck: [card('spades', 'A')], // 14 < 17
-      tarotDeck: [7],
-    })
-    sChar = submitDrawChoice(sChar, P1, 'tarot')
-    sChar = submitDrawChoice(sChar, P2, 'classic', { rng: () => 0.1 })
-    expect(sChar.roundOutcome?.winnerId).toBe(P1)
-  })
-
-  it('Priority 6 & 7: XV. Le Diable bust (-2), XI. La Force Joker, overridden by V. Le Pape and X. La Roue', () => {
-    // Le Diable bust (>21)
-    let sDiable = setupRiggedMatch({
-      p1Deck: [card('clubs', '10'), card('hearts', 'K')], // 10 <= 11 triggers K -> 23 Bust!
-      p2Deck: [card('spades', 'J')],
-      tarotDeck: [15],
-    })
-    sDiable.playersRecord[P1].score = 3
-    sDiable = submitDrawChoice(sDiable, P1, 'tarot')
-    sDiable = submitDrawChoice(sDiable, P2, 'classic', { rng: () => 0.1 })
-    expect(sDiable.playersRecord[P1].bustedDiable).toBe(true)
-    expect(sDiable.playersRecord[P1].score).toBe(1)
-    expect(sDiable.roundOutcome?.winnerId).toBe(P2)
-
-    // XI. La Force sacrifice vs X. La Roue de la Fortune override
-    let sOverride = setupRiggedMatch({
-      tarotDeck: [11, 10], // P1 La Force, P2 La Roue
-    })
-    sOverride.playersRecord[P1].score = 2
-    sOverride = submitDrawChoice(sOverride, P1, 'tarot')
-    sOverride = submitDrawChoice(sOverride, P2, 'tarot', { rng: () => 0.1 })
-    expect(sOverride.pendingPrompts[0]?.type).toBe('FORCE_SACRIFICE')
-    sOverride = resolveArcanePrompt(sOverride, P1, { type: 'FORCE_SACRIFICE', sacrifice: true })
-    expect(sOverride.playersRecord[P1].forceJokerSecured).toBe(true)
-    // Priority 7 overrides La Force Joker!
-    expect(sOverride.pendingPrompts[0]?.type).toBe('WHEEL_CALL_COIN')
-    // rng = 0.1 -> flipCoin returns 'heads'
-    sOverride = resolveArcanePrompt(sOverride, P1, { type: 'WHEEL_CALL_COIN', call: 'heads' }, () => 0.1)
-    expect(sOverride.roundOutcome?.winnerId).toBe(P1)
-    expect(sOverride.playersRecord[P1].score).toBe(3) // 2 - 1 + 2 = 3
-
-    // V. Le Pape overriding La Force Joker
-    let sPape = setupRiggedMatch({ tarotDeck: [11, 5] })
-    sPape.playersRecord[P1].score = 2
-    sPape = submitDrawChoice(sPape, P1, 'tarot')
-    sPape = submitDrawChoice(sPape, P2, 'tarot', { rng: () => 0.1 })
-    sPape = resolveArcanePrompt(sPape, P1, { type: 'FORCE_SACRIFICE', sacrifice: true })
-    expect(sPape.roundOutcome?.cancelled).toBe(true)
-  })
-
-  it("Priority 8 & 9: VIII. La Justice gap >= 5, VI. L'Amoureux same color (+2), XIX. Le Soleil inversion", () => {
-    // La Justice reverses gap >= 5
-    let sJust = setupRiggedMatch({
-      p1Deck: [card('clubs', '3')],
-      p2Deck: [card('spades', 'K')], // 13 - 3 = 10 >= 5
-      tarotDeck: [8],
-    })
-    sJust = submitDrawChoice(sJust, P1, 'tarot')
-    sJust = submitDrawChoice(sJust, P2, 'classic', { rng: () => 0.1 })
-    expect(sJust.roundOutcome?.winnerId).toBe(P1)
-
-    // L'Amoureux same red color -> +2 points
-    let sLove = setupRiggedMatch({
+    let sForce = setupRiggedMatch({
       p1Deck: [card('hearts', '2')],
-      p2Deck: [card('diamonds', 'A')],
-      tarotDeck: [6],
-    })
-    sLove = submitDrawChoice(sLove, P1, 'tarot')
-    sLove = submitDrawChoice(sLove, P2, 'classic', { rng: () => 0.1 })
-    expect(sLove.roundOutcome?.winnerId).toBe(P1)
-    expect(sLove.playersRecord[P1].score).toBe(2)
-
-    // Le Soleil inversion (lowest wins)
-    let sSun = setupRiggedMatch({
-      p1Deck: [card('clubs', '3')],
       p2Deck: [card('spades', 'A')],
+      tarotDeck: [11],
+    })
+    sForce.playersRecord[P1].score = 2
+    sForce = submitDrawChoice(sForce, P1, 'tarot')
+    sForce = submitDrawChoice(sForce, P2, 'classic', { rng: () => 0.1 })
+    sForce = advancePresentationStep(sForce, () => 0.1)
+    expect(sForce.pendingPrompts[0]?.type).toBe('FORCE_SACRIFICE')
+    sForce = resolveArcanePrompt(sForce, P1, { type: 'FORCE_SACRIFICE', sacrifice: true })
+    sForce = runStepsUntilResolved(sForce)
+    expect(sForce.roundOutcome?.winnerId).toBe(P1)
+    expect(sForce.playersRecord[P1].score).toBe(2)
+  })
+
+  it('XIX. Le Soleil reveals ONLY the next 3 cards per deck (3 -> 2 -> 1 -> 0) and then disappears', () => {
+    let s = setupRiggedMatch({
+      p1Deck: [
+        card('hearts', '4'),
+        card('hearts', '5'),
+        card('hearts', '6'),
+        card('hearts', '7'),
+        card('hearts', '8'),
+      ],
+      p2Deck: [
+        card('clubs', '4'),
+        card('clubs', '5'),
+        card('clubs', '6'),
+        card('clubs', '7'),
+        card('clubs', '8'),
+      ],
       tarotDeck: [19],
     })
-    sSun = submitDrawChoice(sSun, P1, 'tarot')
-    sSun = submitDrawChoice(sSun, P2, 'classic', { rng: () => 0.1 })
-    expect(sSun.activePersistentArcana.sun).toBe(true)
-    expect(sSun.roundOutcome?.winnerId).toBe(P1)
-  })
+    // Round 1: P1 draws XIX. Le Soleil, P2 draws Classic (consumes 1 card each -> 4 remain each)
+    s = submitDrawChoice(s, P1, 'tarot')
+    s = submitDrawChoice(s, P2, 'classic', { rng: () => 0.1 })
+    s = runStepsUntilResolved(s)
+    expect(s.activePersistentArcana.sun?.revealedCardsRemaining[P1]).toBe(3)
+    expect(s.activePersistentArcana.sun?.revealedCardsRemaining[P2]).toBe(3)
 
-  it("Priority 10 & XX. Le Jugement: IV. L'Empereur, XVII. L'Étoile, XVIII. La Lune, XXI. Le Monde, XX. Jugement", () => {
-    // XXI. Le Monde (+2 on win) + XVII. L'Étoile pick + IV. L'Empereur lock
-    let sEmp = setupRiggedMatch({
-      p1Deck: [card('hearts', 'Q'), card('hearts', '7')],
-      p2Deck: [card('clubs', '5'), card('spades', '9')],
-      tarotDeck: [4, 17],
-    })
-    sEmp = submitDrawChoice(sEmp, P1, 'tarot')
-    sEmp = submitDrawChoice(sEmp, P2, 'classic', { rng: () => 0.1 })
-    expect(sEmp.pendingPrompts[0]?.type).toBe('EMPEROR_CHOOSE_LOCK')
-    sEmp = resolveArcanePrompt(sEmp, P1, {
-      type: 'EMPEROR_CHOOSE_LOCK',
-      mode: 'forbid_tarot',
-    })
-    sEmp = advanceToNextRound(sEmp)
-    expect(canPlayerChooseTarot(sEmp, P2)).toBe(false)
-
-    // L'Étoile matching #7 gives +2 points on win
-    let sStar = setupRiggedMatch({
-      p1Deck: [card('hearts', '7')],
-      p2Deck: [card('clubs', '2')],
-    })
-    sStar.activePersistentArcana.star[P1] = { targetNumber: 7, remainingTurns: 2 }
-    sStar = submitDrawChoice(sStar, P1, 'classic')
-    sStar = submitDrawChoice(sStar, P2, 'classic')
-    expect(sStar.roundOutcome?.winnerId).toBe(P1)
-    expect(sStar.playersRecord[P1].score).toBe(2)
-
-    // XVIII. La Lune hides round outcome until next round choices lock in
-    let sMoon = setupRiggedMatch({
-      p1Deck: [card('hearts', 'K'), card('hearts', '8')],
-      p2Deck: [card('clubs', '4'), card('spades', '3')],
-      tarotDeck: [18],
-    })
-    sMoon = submitDrawChoice(sMoon, P1, 'tarot')
-    sMoon = submitDrawChoice(sMoon, P2, 'classic', { rng: () => 0.1 })
-    expect(sMoon.roundOutcome?.hiddenByMoon).toBe(true)
-    sMoon = advanceToNextRound(sMoon)
-    sMoon = submitDrawChoice(sMoon, P1, 'classic')
-    sMoon = submitDrawChoice(sMoon, P2, 'classic')
-    expect(sMoon.lastRevealedMoonOutcome?.roundNumber).toBe(1)
-
-    // XX. Le Jugement copying XXI. Le Monde from discard -> +2 rounds
-    let sJudg = setupRiggedMatch({
-      p1Deck: [card('hearts', 'A')],
-      p2Deck: [card('clubs', '3')],
-      tarotDeck: [20],
-      tarotDiscard: [21],
-    })
-    sJudg = submitDrawChoice(sJudg, P1, 'tarot')
-    sJudg = submitDrawChoice(sJudg, P2, 'classic', { rng: () => 0.1 })
-    expect(sJudg.pendingPrompts[0]?.type).toBe('JUDGMENT_COPY_DISCARD')
-    sJudg = resolveArcanePrompt(sJudg, P1, {
-      type: 'JUDGMENT_COPY_DISCARD',
-      targetArcanum: 21,
-    })
-    expect(sJudg.playersRecord[P1].score).toBe(2)
-  })
-
-  it('ends the match when a player reaches 5 won rounds', () => {
-    let s = setupRiggedMatch({
-      p1Deck: [card('hearts', 'A')],
-      p2Deck: [card('clubs', '2')],
-    })
-    s.playersRecord[P1].score = 4
+    // Draw 1 card per player -> 2 remaining
+    s = advanceToNextRound(s)
     s = submitDrawChoice(s, P1, 'classic')
     s = submitDrawChoice(s, P2, 'classic')
-    expect(s.status).toBe('finished')
-    expect(s.phase).toBe('FINISHED')
-    expect(s.winnerId).toBe(P1)
-    expect(s.playersRecord[P1].score).toBe(5)
+    s = runStepsUntilResolved(s)
+    expect(s.activePersistentArcana.sun?.revealedCardsRemaining[P1]).toBe(2)
+    expect(s.activePersistentArcana.sun?.revealedCardsRemaining[P2]).toBe(2)
+
+    // Draw 2nd card per player -> 1 remaining
+    s = advanceToNextRound(s)
+    s = submitDrawChoice(s, P1, 'classic')
+    s = submitDrawChoice(s, P2, 'classic')
+    s = runStepsUntilResolved(s)
+    expect(s.activePersistentArcana.sun?.revealedCardsRemaining[P1]).toBe(1)
+    expect(s.activePersistentArcana.sun?.revealedCardsRemaining[P2]).toBe(1)
+
+    // Draw 3rd card per player -> 0 remaining -> Sun disappears!
+    s = advanceToNextRound(s)
+    s = submitDrawChoice(s, P1, 'classic')
+    s = submitDrawChoice(s, P2, 'classic')
+    s = runStepsUntilResolved(s)
+    expect(s.activePersistentArcana.sun).toBeNull()
+  })
+
+  it("IV. L'Empereur triggers an interactive EMPEROR_CHOICE at the start of EACH of the next 2 turns", () => {
+    let s = setupRiggedMatch({
+      p1Deck: [card('hearts', '3'), card('hearts', '4'), card('hearts', '5'), card('hearts', '6')],
+      p2Deck: [card('clubs', '3'), card('clubs', '4'), card('clubs', '5'), card('clubs', '6')],
+      tarotDeck: [4, 3, 8, 5],
+    })
+    // Round 1: P1 draws IV. L'Empereur -> NO prompt during Round 1!
+    s = submitDrawChoice(s, P1, 'tarot')
+    s = submitDrawChoice(s, P2, 'classic', { rng: () => 0.1 })
+    s = advancePresentationStep(s, () => 0.1) // TAROT_1 = Emperor
+    expect(s.pendingPrompts).toHaveLength(0)
+    s = runStepsUntilResolved(s)
+    expect(s.activePersistentArcana.emperor[P2]?.remainingTurns).toBe(2)
+
+    // Start of Round 2 -> EMPEROR_CHOICE for P1 (Turn 1 of 2): choose force_tarot (overrides cooldown!)
+    s = advanceToNextRound(s)
+    expect(s.presentationStep).toBe('EMPEROR_CHOICE')
+    expect(s.pendingPrompts[0]?.type).toBe('EMPEROR_CHOOSE_LOCK')
+    s.playersRecord[P2].tarotCooldown = true
+    s = resolveArcanePrompt(s, P1, { type: 'EMPEROR_CHOOSE_LOCK', mode: 'force_tarot' })
+    expect(s.presentationStep).toBe('CHOOSING')
+    expect(canPlayerChooseTarot(s, P2)).toBe(true)
+
+    // Play Round 2 (P2 forced to choose tarot)
+    s = submitDrawChoice(s, P1, 'classic')
+    s = submitDrawChoice(s, P2, 'tarot', { rng: () => 0.1 })
+    s = runStepsUntilResolved(s)
+
+    // Start of Round 3 -> EMPEROR_CHOICE AGAIN for P1 (Turn 2 of 2): choose forbid_tarot!
+    s = advanceToNextRound(s)
+    expect(s.presentationStep).toBe('EMPEROR_CHOICE')
+    expect(s.pendingPrompts[0]?.type).toBe('EMPEROR_CHOOSE_LOCK')
+    s = resolveArcanePrompt(s, P1, { type: 'EMPEROR_CHOOSE_LOCK', mode: 'forbid_tarot' })
+    expect(s.presentationStep).toBe('CHOOSING')
+    expect(canPlayerChooseTarot(s, P2)).toBe(false)
+
+    // Play Round 3
+    s = submitDrawChoice(s, P1, 'classic')
+    s = submitDrawChoice(s, P2, 'classic')
+    s = runStepsUntilResolved(s)
+
+    // Start of Round 4 -> Emperor expired, directly CHOOSING!
+    s = advanceToNextRound(s)
+    expect(s.presentationStep).toBe('CHOOSING')
+    expect(s.activePersistentArcana.emperor[P2]).toBeNull()
+  })
+
+  it("XX. Le Jugement copying IX. L'Ermite vs a Tarot opponent never leaks future classic card or skips TAROT_2", () => {
+    let s = setupRiggedMatch({
+      p1Deck: [card('hearts', 'K')],
+      p2Deck: [card('clubs', 'A')],
+      tarotDeck: [20, 3], // P1 Judgment, P2 Empress
+      tarotDiscard: [9], // IX. L'Ermite in discard
+    })
+
+    s = submitDrawChoice(s, P1, 'tarot')
+    s = submitDrawChoice(s, P2, 'tarot', { rng: () => 0.1 })
+    expect(s.presentationStep).toBe('CLASSIC_REVEAL')
+
+    // TAROT_1 = P1 Judgment (rng 0.1 orders P1 first)
+    s = advancePresentationStep(s, () => 0.1)
+    expect(s.presentationStep).toBe('TAROT_1')
+    expect(s.pendingPrompts[0]?.type).toBe('JUDGMENT_COPY_DISCARD')
+    // Opponent P2 has NOT drawn their classic card yet
+    expect(s.playersRecord[P2].drawnClassic).toBeNull()
+
+    // Confirm copying IX. L'Ermite -> transitions cleanly to ERMITE_DECIDE without advancing turn or drawing P2's card!
+    s = resolveArcanePrompt(s, P1, { type: 'JUDGMENT_COPY_DISCARD', targetArcanum: 9 })
+    expect(s.presentationStep).toBe('TAROT_1')
+    expect(s.pendingPrompts[0]?.type).toBe('ERMITE_DECIDE')
+    if (s.pendingPrompts[0]?.type === 'ERMITE_DECIDE') {
+      expect(s.pendingPrompts[0].opponentChoseTarot).toBe(true)
+      expect(s.pendingPrompts[0].observedOpponentCard).toBeNull()
+    }
+    expect(s.playersRecord[P2].drawnClassic).toBeNull()
+
+    // P1 chooses to play -> still on TAROT_1 until user clicks to see TAROT_2 (Empress)
+    s = resolveArcanePrompt(s, P1, { type: 'ERMITE_DECIDE', decision: 'play' })
+    expect(s.presentationStep).toBe('TAROT_1')
+    expect(s.playersRecord[P2].drawnClassic).toBeNull()
+
+    // Click to TAROT_2 (P2's Empress), then click to RESOLVED (final classic cards drawn & compared)
+    s = advancePresentationStep(s, () => 0.1)
+    expect(s.presentationStep).toBe('TAROT_2')
+    s = advancePresentationStep(s, () => 0.1)
+    expect(s.presentationStep).toBe('RESOLVED')
+    expect(s.playersRecord[P2].drawnClassic?.rank).toBe('A')
+    expect(s.playersRecord[P2].score).toBe(2)
+  })
+
+  it("Priority 10: XVII. L'Étoile (+2 on next 2 turns), XVIII. La Lune, and XX. Le Jugement empty discard", () => {
+    let sStar = setupRiggedMatch({
+      p1Deck: [card('hearts', 'A'), card('clubs', '4')],
+      p2Deck: [card('spades', '2'), card('diamonds', '7')],
+      tarotDeck: [17],
+    })
+    sStar = submitDrawChoice(sStar, P1, 'tarot')
+    sStar = submitDrawChoice(sStar, P2, 'classic', { rng: () => 0.1 })
+    sStar = advancePresentationStep(sStar, () => 0.1)
+    sStar = resolveArcanePrompt(sStar, P1, { type: 'STAR_PICK_NUMBER', number: 7 })
+    sStar = runStepsUntilResolved(sStar)
+    sStar = advanceToNextRound(sStar)
+    sStar = submitDrawChoice(sStar, P1, 'classic')
+    sStar = submitDrawChoice(sStar, P2, 'classic')
+    sStar = runStepsUntilResolved(sStar)
+    expect(sStar.roundOutcome?.starTriggered).toEqual({ ownerId: P1, matchedNumber: 7 })
+    expect(sStar.playersRecord[P1].score).toBe(3)
+    expect(sStar.activePersistentArcana.star[P1]).toBeNull()
+
+    let sMoon = setupRiggedMatch({ tarotDeck: [18] })
+    sMoon = submitDrawChoice(sMoon, P1, 'tarot')
+    sMoon = submitDrawChoice(sMoon, P2, 'classic', { rng: () => 0.1 })
+    sMoon = runStepsUntilResolved(sMoon)
+    expect(sMoon.activePersistentArcana.moon).toBe(true)
+
+    let sJudgEmpty = setupRiggedMatch({
+      p1Deck: [card('hearts', 'K')],
+      p2Deck: [card('clubs', '4')],
+      tarotDeck: [20],
+      tarotDiscard: [],
+    })
+    sJudgEmpty = submitDrawChoice(sJudgEmpty, P1, 'tarot')
+    sJudgEmpty = submitDrawChoice(sJudgEmpty, P2, 'classic', { rng: () => 0.1 })
+    sJudgEmpty = runStepsUntilResolved(sJudgEmpty)
+    expect(sJudgEmpty.roundOutcome?.winnerId).toBe(P1)
+    expect(sJudgEmpty.playersRecord[P1].score).toBe(1)
   })
 })

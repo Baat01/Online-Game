@@ -2,7 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { clsx } from 'clsx'
 import { resolveDiceTheme, type DiceThemeId } from '../themes'
-import { buildDieGeometryData, computeTargetDieQuaternion, type DieType } from './geometry3d'
+import {
+  alignFaceToCamera,
+  buildDieGeometryData,
+  computeTargetDieQuaternion,
+  type DieType,
+} from './geometry3d'
 
 export interface Dice3DProps {
   dieType: DieType
@@ -129,16 +134,25 @@ function drawDiePolygonFrame(
   }
 
   if (dieType === 'd10' || dieType === 'd10-tens') {
-    ctx.moveTo(c, size * 0.08)
-    ctx.lineTo(size * 0.87, size * 0.56)
-    ctx.lineTo(c, size * 0.9)
-    ctx.lineTo(size * 0.13, size * 0.56)
+    ctx.moveTo(c, size * 0.14)
+    ctx.lineTo(size * 0.84, size * 0.56)
+    ctx.lineTo(c, size * 0.72)
+    ctx.lineTo(size * 0.16, size * 0.56)
     ctx.closePath()
     ctx.stroke()
     return
   }
 
-  // d4, d8, d16, d20: triangular frame matched to UV coordinates
+  if (dieType === 'd16') {
+    ctx.moveTo(c, size * 0.14)
+    ctx.lineTo(size * 0.67, size * 0.67)
+    ctx.lineTo(size * 0.33, size * 0.67)
+    ctx.closePath()
+    ctx.stroke()
+    return
+  }
+
+  // d4, d8, d20: triangular frame matched to UV coordinates
   ctx.moveTo(c, size * 0.16)
   ctx.lineTo(size * 0.83, size * 0.78)
   ctx.lineTo(size * 0.17, size * 0.78)
@@ -169,26 +183,33 @@ function createDieFaceTexture(
 
     // Subtle filigree face polygon + inner bevel ring
     ctx.globalAlpha = isCritical ? 0.85 : 0.55
-    drawDiePolygonFrame(ctx, dieType, size, isCritical ? '#fde047' : palette.edgeHex, 8)
-    ctx.globalAlpha = 0.25
-    ctx.beginPath()
-    ctx.arc(cx, cy, size * 0.24, 0, Math.PI * 2)
-    ctx.strokeStyle = palette.edgeHex
-    ctx.lineWidth = 3
-    ctx.stroke()
+    drawDiePolygonFrame(ctx, dieType, size, isCritical ? '#fde047' : palette.edgeHex, 7)
+    if (dieType !== 'd16') {
+      ctx.globalAlpha = 0.25
+      ctx.beginPath()
+      ctx.arc(cx, cy, size * 0.22, 0, Math.PI * 2)
+      ctx.strokeStyle = palette.edgeHex
+      ctx.lineWidth = 3
+      ctx.stroke()
+    }
     ctx.globalAlpha = 1
 
-    const isTriFace = dieType === 'd4' || dieType === 'd8' || dieType === 'd16' || dieType === 'd20'
     const cleanLabel = label.endsWith('.') ? label.slice(0, -1) : label
     const hasUnderbar = label.endsWith('.')
-    const fontSize = isTriFace
-      ? cleanLabel.length >= 2
-        ? 116
-        : 138
-      : cleanLabel.length >= 2
-        ? 152
-        : 184
-    const textY = isTriFace ? size * 0.56 : size * 0.51
+    let fontSize = cleanLabel.length >= 2 ? 152 : 184
+    let textY = size * 0.51
+
+    if (dieType === 'd16') {
+      // Sized generously inside the narrower dipyramid width around visualCenter (0.5, 0.5)
+      fontSize = cleanLabel.length >= 2 ? 84 : 102
+      textY = size * 0.505
+    } else if (dieType === 'd10' || dieType === 'd10-tens') {
+      fontSize = cleanLabel.length >= 2 ? 116 : 140
+      textY = size * 0.505
+    } else if (dieType === 'd4' || dieType === 'd8' || dieType === 'd20') {
+      fontSize = cleanLabel.length >= 2 ? 116 : 138
+      textY = size * 0.56
+    }
 
     ctx.fillStyle = isCritical ? '#fef08a' : palette.numeralHex
     ctx.font = `900 ${fontSize}px "Georgia", serif`
@@ -199,8 +220,9 @@ function createDieFaceTexture(
     ctx.fillText(cleanLabel, cx, textY)
 
     if (hasUnderbar) {
-      const barW = fontSize * 0.42
-      ctx.fillRect(cx - barW / 2, textY + fontSize * 0.44, barW, 8)
+      const barW = fontSize * 0.44
+      const barH = Math.max(6, Math.round(fontSize * 0.055))
+      ctx.fillRect(cx - barW / 2, textY + fontSize * 0.46, barW, barH)
     }
   }
   const tex = new THREE.CanvasTexture(canvas)
@@ -251,7 +273,12 @@ export function Dice3D({
 
   useEffect(() => {
     const resolvedVal = value ?? (dieType === 'd10' || dieType === 'd10-tens' ? 0 : 1)
-    targetQuatRef.current = computeTargetDieQuaternion(dieType, resolvedVal)
+    const targetSpec = buildDieGeometryData(dieType)
+    targetSpec.geometry.dispose()
+    const matchFace = targetSpec.faces.find((f) => f.value === resolvedVal)
+    targetQuatRef.current = matchFace
+      ? alignFaceToCamera(matchFace.normal, matchFace.up)
+      : computeTargetDieQuaternion(dieType, resolvedVal)
     userOffsetQuatRef.current.identity()
 
     if (value !== null) {

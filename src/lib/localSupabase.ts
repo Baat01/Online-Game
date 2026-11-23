@@ -700,11 +700,15 @@ class LocalQueryBuilder {
       let matched = rows.filter((r) => this.filters.every((fn) => fn(r)))
       if (this.orderBy) {
         const { col, ascending } = this.orderBy
-        matched = [...matched].sort((a, b) => {
-          const av = String(a[col] ?? '')
-          const bv = String(b[col] ?? '')
-          return ascending ? av.localeCompare(bv) : bv.localeCompare(av)
+        const indexed = matched.map((row, index) => ({ row, index }))
+        indexed.sort((a, b) => {
+          const av = String(a.row[col] ?? '')
+          const bv = String(b.row[col] ?? '')
+          const cmp = ascending ? av.localeCompare(bv) : bv.localeCompare(av)
+          if (cmp !== 0) return cmp
+          return ascending ? a.index - b.index : b.index - a.index
         })
+        matched = indexed.map((entry) => entry.row)
       }
       if (this.limitCount !== null) {
         matched = matched.slice(0, this.limitCount)

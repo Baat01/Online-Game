@@ -130,7 +130,7 @@ async function seedRoom(gameSlug: string, metadata: Record<string, unknown>) {
   return roomId
 }
 
-describe('Phase 5 & 6 Multi-Game UI, Realtime Room, Yen Wagering & Player-Bound Themes', () => {
+describe('Multi-Game UI, Realtime Room, Yen Wagering & Player-Bound Themes', () => {
   beforeEach(() => {
     window.localStorage.clear()
     window.sessionStorage.clear()
@@ -615,7 +615,7 @@ describe('Phase 5 & 6 Multi-Game UI, Realtime Room, Yen Wagering & Player-Bound 
     expect(tarotBackImg.getAttribute('src')).toBe(UNDERTALE_TAROT_BACK_IMAGE)
   })
 
-  it('plays Le 23e Arcane end-to-end across Host and Guest & renders D4/D12/D16 and 666 Gaster', async () => {
+  it('plays Le 23e Arcane sequentially (Classic -> Tarot Spotlight -> Click-to-Continue) & inspects Tarot modal', async () => {
     const state = createInitialArcane23State([DEMO_HOST_ID, DEMO_GUEST_ID], DEMO_HOST_ID)
     state.playersRecord[DEMO_HOST_ID].classicDeck = [
       { id: 'hearts-A', suit: 'hearts', rank: 'A' },
@@ -623,23 +623,24 @@ describe('Phase 5 & 6 Multi-Game UI, Realtime Room, Yen Wagering & Player-Bound 
     state.playersRecord[DEMO_GUEST_ID].classicDeck = [
       { id: 'clubs-2', suit: 'clubs', rank: '2' },
     ]
+    state.tarotDeck = [3] // III. L'Impératrice (+2 rounds)
     const roomId = await seedRoom('23e-arcane', state as unknown as Record<string, unknown>)
 
-    // Host chooses classic
+    // Host chooses Tarot
     currentTestUserId = DEMO_HOST_ID
     const v1 = renderGameRoute(
       '/room/:roomId/play/23e-arcane',
       `/room/${roomId}/play/23e-arcane`,
       <Arcane23Page />,
     )
-    const classicBtn = await screen.findByRole('button', { name: /tirer carte classique/i })
-    fireEvent.click(classicBtn)
+    const tarotBtn = await screen.findByRole('button', { name: /invoquer un arcane/i })
+    fireEvent.click(tarotBtn)
     await waitFor(() => {
       expect(screen.getByText(/votre choix secret.*verrouillé/i)).toBeInTheDocument()
     })
     v1.unmount()
 
-    // Guest locks in classic -> round resolves immediately in favor of Host (A > 2)
+    // Guest locks in classic -> Étape 1 (CLASSIC_REVEAL) displays, then click anywhere advances to Étape 2 (TAROT_1)
     currentTestUserId = DEMO_GUEST_ID
     const v2 = renderGameRoute(
       '/room/:roomId/play/23e-arcane',
@@ -648,21 +649,90 @@ describe('Phase 5 & 6 Multi-Game UI, Realtime Room, Yen Wagering & Player-Bound 
     )
     const guestBtn = await screen.findByRole('button', { name: /tirer carte classique/i })
     fireEvent.click(guestBtn)
+
+    // Étape 1 — Révélation des cartes classiques
+    expect(await screen.findByTestId('classic-reveal-banner')).toBeInTheDocument()
+
+    // Click anywhere to advance to Étape 2 — Carte de Tarot n° 1 au premier plan
+    fireEvent.click(screen.getByTestId('click-anywhere-continue'))
+    const spotlight = await screen.findByTestId('tarot-spotlight-stage')
+    expect(spotlight).toBeInTheDocument()
+    expect(spotlight).toHaveTextContent(/impératrice/i)
+
+    // Verify top-right "Joué par <Player>" badge on spotlight card
+    const playedByBadge = screen.getByTestId('tarot-played-by-badge')
+    expect(playedByBadge).toHaveTextContent(/joué par/i)
+    expect(playedByBadge).toHaveTextContent(/alex rivera/i)
+
+    // Click on the Tarot card itself inside spotlight to open detailed effect modal with "Joué par" badge
+    const tarotImgs = screen.getAllByAltText(/III —/i)
+    fireEvent.click(tarotImgs[0])
+    expect(await screen.findByTestId('tarot-detail-modal')).toBeInTheDocument()
+    expect(screen.getByTestId('tarot-modal-played-by-badge')).toHaveTextContent(/alex rivera/i)
+    fireEvent.click(screen.getByRole('button', { name: /fermer la fiche tarot/i }))
+
+    // Click anywhere again to resolve the round
+    fireEvent.click(screen.getByTestId('click-anywhere-continue'))
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /manche suivante/i })).toBeInTheDocument()
     })
     v2.unmount()
 
-    // Verify D4, D12, D16 and 666. Gaster rendering
+    // Test XX. Le Jugement 2-step preview + separate confirm button copying IX. L'Ermite
+    const judgState = createInitialArcane23State([DEMO_HOST_ID, DEMO_GUEST_ID], DEMO_HOST_ID)
+    judgState.tarotDeck = [20, 3]
+    judgState.tarotDiscard = [9]
+    judgState.playersRecord[DEMO_HOST_ID].choice = 'tarot'
+    judgState.playersRecord[DEMO_GUEST_ID].choice = 'tarot'
+    judgState.playersRecord[DEMO_HOST_ID].drawnTarot = 20
+    judgState.playersRecord[DEMO_HOST_ID].effectiveTarot = 20
+    judgState.playersRecord[DEMO_HOST_ID].tarotRevealed = true
+    judgState.playersRecord[DEMO_GUEST_ID].drawnTarot = 3
+    judgState.playersRecord[DEMO_GUEST_ID].effectiveTarot = 3
+    judgState.tarotDrawOrder = [DEMO_HOST_ID, DEMO_GUEST_ID]
+    judgState.phase = 'INTERACTION'
+    judgState.presentationStep = 'TAROT_1'
+    judgState.pendingPrompts = [
+      {
+        id: 'judgment-1',
+        type: 'JUDGMENT_COPY_DISCARD',
+        playerId: DEMO_HOST_ID,
+        availableArcana: [9],
+      },
+    ]
+    const judgRoomId = await seedRoom('23e-arcane', judgState as unknown as Record<string, unknown>)
+
+    currentTestUserId = DEMO_HOST_ID
+    const vJudg = renderGameRoute(
+      '/room/:roomId/play/23e-arcane',
+      `/room/${judgRoomId}/play/23e-arcane`,
+      <Arcane23Page />,
+    )
+
+    // Clicking the discarded Arcana previews it WITHOUT validating immediately
+    const ermiteChoiceBtn = await screen.findByRole('button', { name: /IX\. Gerson/i })
+    fireEvent.click(ermiteChoiceBtn)
+    expect(await screen.findByTestId('judgment-preview-panel')).toBeInTheDocument()
+    expect(screen.queryByTestId('ermite-decision-panel')).not.toBeInTheDocument()
+
+    // Clicking the separate confirm button validates and reveals Hermit's Play/Cancel choice (even vs Tarot opponent!)
+    fireEvent.click(screen.getByTestId('judgment-confirm-btn'))
+    expect(await screen.findByTestId('ermite-decision-panel')).toBeInTheDocument()
+    expect(screen.getByText(/a également choisi le tarot/i)).toBeInTheDocument()
+    vJudg.unmount()
+
+    // Verify D4, D10, D12, D16 and 666. Gaster rendering
     render(
       <div>
         <Dice3D dieType="d4" value={4} />
+        <Dice3D dieType="d10" value={9} />
         <Dice3D dieType="d12" value={12} />
         <Dice3D dieType="d16" value={16} />
         <TarotArcanaCard arcanum={GASTER_TAROT_ARCANUM} />
       </div>,
     )
     expect(document.querySelector('[data-dice-type="d4"]')).toBeInTheDocument()
+    expect(document.querySelector('[data-dice-type="d10"]')).toBeInTheDocument()
     expect(document.querySelector('[data-dice-type="d12"]')).toBeInTheDocument()
     expect(document.querySelector('[data-dice-type="d16"]')).toBeInTheDocument()
     expect(screen.getByAltText(/666 — Gaster/i)).toBeInTheDocument()

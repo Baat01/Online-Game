@@ -1,5 +1,5 @@
 import { clsx } from 'clsx'
-import { Crown, Sparkles, Clock, Lock } from 'lucide-react'
+import { Crown, Sparkles, Clock, Lock, Sun } from 'lucide-react'
 import { ThemedCard } from '@/games/_shared/components/ThemedCard'
 import { TarotArcanaCard } from '@/games/_shared/components/TarotArcanaCard'
 import { AnimatedDice } from '@/games/_shared/components/AnimatedDice'
@@ -11,41 +11,55 @@ import {
   type Arcane23PlayerState,
   type Arcane23State,
 } from '../engine/arcane23Engine'
+import type { InspectedTarotInfo } from './TarotDetailModal'
 
 interface PlayerAreaProps {
   gameState: Arcane23State
   playerState: Arcane23PlayerState
   displayName: string
+  avatarUrl?: string | null
   clanTitle?: string | null
   isSelf: boolean
   isWinner: boolean
   themes?: PlayerCardThemeSelection
+  onInspectTarot: (info: InspectedTarotInfo) => void
 }
 
 export function PlayerArea({
   gameState,
   playerState,
   displayName,
+  avatarUrl,
   clanTitle,
   isSelf,
   isWinner,
   themes,
+  onInspectTarot,
 }: PlayerAreaProps) {
-  const isRevealed = gameState.phase === 'ROUND_END' || gameState.phase === 'FINISHED' || gameState.phase === 'INTERACTION'
-  const veiledByMoon =
-    gameState.phase === 'ROUND_END' &&
-    Boolean(gameState.roundOutcome?.hiddenByMoon)
+  const isStepRevealing =
+    gameState.presentationStep !== 'CHOOSING' && gameState.presentationStep !== 'EMPEROR_CHOICE'
+  const isFullyResolved =
+    gameState.presentationStep === 'RESOLVED' || gameState.phase === 'FINISHED'
+  const hideClassicUnderMoon = gameState.activePersistentArcana.moon && !isFullyResolved
+
   const constraint = getTarotChoiceConstraint(gameState, playerState.userId)
   const activeScore = getPlayerEffectiveClassicScore(playerState)
+  const showTarotCard =
+    playerState.drawnTarot !== null && (playerState.tarotRevealed || isFullyResolved)
   const tarotArcanum =
-    playerState.drawnTarot !== null ? getUndertaleArcanum(playerState.drawnTarot) : null
+    showTarotCard && playerState.drawnTarot !== null
+      ? getUndertaleArcanum(playerState.drawnTarot)
+      : null
+
+  const sunRemaining =
+    gameState.activePersistentArcana.sun?.revealedCardsRemaining[playerState.userId] ?? 0
 
   return (
     <div
       data-testid={`arcane23-player-${isSelf ? 'self' : 'opponent'}`}
       className={clsx(
         'rounded-2xl border p-4 transition-all duration-300',
-        playerState.drawnTarot === 666
+        playerState.drawnTarot === 666 && showTarotCard
           ? 'bg-purple-950/50 border-purple-400 shadow-[0_0_28px_rgba(168,85,247,0.45)]'
           : isWinner
             ? 'bg-gold-500/10 border-gold-400 shadow-[0_0_24px_rgba(250,204,21,0.28)]'
@@ -103,11 +117,42 @@ export function PlayerArea({
             <Lock className="size-3" /> {constraint.reason}
           </span>
         )}
+
+        {!constraint.canChooseClassic && constraint.reason && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-purple-500/15 border border-purple-400/35 text-purple-200">
+            <Lock className="size-3" /> {constraint.reason}
+          </span>
+        )}
       </div>
+
+      {/* XIX. Le Soleil — Reveals ONLY the remaining targeted cards (3 -> 2 -> 1 -> 0) */}
+      {sunRemaining > 0 && playerState.classicDeck.length > 0 && (
+        <div
+          data-testid={`sun-top3-${isSelf ? 'self' : 'opponent'}`}
+          className="mt-3 rounded-xl bg-amber-950/30 border border-amber-500/35 p-2 flex flex-wrap items-center gap-2"
+        >
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-amber-300">
+            <Sun className="size-3" /> Prochaines {Math.min(sunRemaining, playerState.classicDeck.length)} carte(s) (Le Soleil) :
+          </span>
+          <div className="flex items-center gap-1.5">
+            {playerState.classicDeck.slice(0, sunRemaining).map((card) => (
+              <ThemedCard
+                key={card.id}
+                suit={card.suit}
+                rank={card.rank}
+                size="sm"
+                frontThemeId={themes?.frontThemeId}
+                backThemeId={themes?.backThemeId}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Cards / Choice Display */}
       <div className="mt-4 flex flex-wrap items-center justify-center gap-4 min-h-40">
-        {gameState.phase === 'CHOOSING' && (
+        {(gameState.presentationStep === 'CHOOSING' ||
+          gameState.presentationStep === 'EMPEROR_CHOICE') && (
           <div className="flex flex-col items-center gap-2">
             {playerState.choice ? (
               <>
@@ -127,35 +172,39 @@ export function PlayerArea({
             ) : (
               <div className="w-24 h-36 rounded-xl border-2 border-dashed border-surface-700 flex flex-col items-center justify-center text-center p-2 text-xs text-slate-500">
                 <Sparkles className="size-5 mb-1 opacity-50" />
-                En attente du choix…
+                {gameState.presentationStep === 'EMPEROR_CHOICE'
+                  ? 'Décret de L’Empereur…'
+                  : 'En attente du choix…'}
               </div>
             )}
           </div>
         )}
 
-        {isRevealed && veiledByMoon && (
-          <div className="flex flex-col items-center gap-2">
-            <ThemedCard
-              isHidden
-              size="lg"
-              frontThemeId={themes?.frontThemeId}
-              backThemeId={themes?.backThemeId}
-              ariaLabel="Carte voilée par La Lune"
-            />
-            <span className="text-xs text-indigo-300 font-semibold">
-              Voilé par XVIII. La Lune
-            </span>
-          </div>
-        )}
-
-        {isRevealed && !veiledByMoon && (
+        {isStepRevealing && (
           <div className="flex flex-wrap items-center justify-center gap-3">
-            {tarotArcanum && (
-              <div className="flex flex-col items-center gap-1 animate-deal-card">
+            {tarotArcanum && playerState.drawnTarot !== null && (
+              <div
+                className="flex flex-col items-center gap-1 animate-deal-card"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onInspectTarot({
+                    arcanumNumber: playerState.drawnTarot!,
+                    playedByName: displayName,
+                    playedByAvatarUrl: avatarUrl,
+                  })
+                }}
+              >
                 <TarotArcanaCard
                   arcanum={tarotArcanum}
                   size="sm"
                   selected={tarotArcanum.number === 666}
+                  onClick={() =>
+                    onInspectTarot({
+                      arcanumNumber: playerState.drawnTarot!,
+                      playedByName: displayName,
+                      playedByAvatarUrl: avatarUrl,
+                    })
+                  }
                 />
                 <span
                   className={clsx(
@@ -173,14 +222,20 @@ export function PlayerArea({
                 <ThemedCard
                   suit={playerState.drawnClassic.suit}
                   rank={playerState.drawnClassic.rank}
+                  isHidden={hideClassicUnderMoon}
                   size="lg"
                   frontThemeId={themes?.frontThemeId}
                   backThemeId={themes?.backThemeId}
                 />
-                {!playerState.drawnClassicExtra && activeScore > 0 && (
+                {!hideClassicUnderMoon && !playerState.drawnClassicExtra && activeScore > 0 && (
                   <span className="text-xs font-mono font-bold text-slate-200">
-                    Valeur : {activeScore}
-                    {playerState.judgmentBonusPower > 0 ? ` (+${playerState.judgmentBonusPower})` : ''}
+                    Puissance : {activeScore}
+                    {playerState.chariotBonus > 0 ? ` (+${playerState.chariotBonus} Chariot)` : ''}
+                  </span>
+                )}
+                {hideClassicUnderMoon && (
+                  <span className="text-[11px] text-indigo-300 font-semibold">
+                    Face cachée (La Lune)
                   </span>
                 )}
               </div>
@@ -191,13 +246,16 @@ export function PlayerArea({
                 <ThemedCard
                   suit={playerState.drawnClassicExtra.suit}
                   rank={playerState.drawnClassicExtra.rank}
+                  isHidden={hideClassicUnderMoon}
                   size="lg"
                   frontThemeId={themes?.frontThemeId}
                   backThemeId={themes?.backThemeId}
                 />
-                <span className="text-xs font-mono font-bold text-amber-300">
-                  Total : {activeScore} {playerState.bustedDiable ? '(BUST > 21)' : ''}
-                </span>
+                {!hideClassicUnderMoon && (
+                  <span className="text-xs font-mono font-bold text-amber-300">
+                    Total L’Amoureux : {activeScore}
+                  </span>
+                )}
               </div>
             )}
 
@@ -214,7 +272,7 @@ export function PlayerArea({
               </div>
             )}
 
-            {playerState.gasterRoll && (
+            {playerState.gasterRoll && showTarotCard && (
               <AnimatedDice
                 tens={null}
                 units={null}

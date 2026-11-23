@@ -20,6 +20,44 @@ function formatDieValueLabel(val: number): string {
   return `${val}`
 }
 
+/**
+ * Computes an exact orthonormal basis (tangent = screen-right, bitangent = screen-up, normal = screen-outward)
+ * and projects the given planar polygon vertices into distortion-free isotropic [0, 1] UVs centered at visualCenter.
+ */
+function projectPlanarFacet(
+  vertices: THREE.Vector3[],
+  normal: THREE.Vector3,
+  apexPoint: THREE.Vector3,
+  visualCenter: THREE.Vector3,
+  uvRadius = 0.42,
+): { uvs: Array<[number, number]>; tangent: THREE.Vector3; bitangent: THREE.Vector3 } {
+  const n = normal.clone().normalize()
+  const rawUp = new THREE.Vector3().subVectors(apexPoint, visualCenter)
+  const projectedUp = rawUp.sub(n.clone().multiplyScalar(rawUp.dot(n)))
+  const bitangent =
+    projectedUp.lengthSq() > 1e-6
+      ? projectedUp.normalize()
+      : new THREE.Vector3(0, 1, 0)
+  const tangent = new THREE.Vector3().crossVectors(bitangent, n).normalize()
+
+  let maxExtent = 1e-4
+  const localCoords = vertices.map((v) => {
+    const rel = new THREE.Vector3().subVectors(v, visualCenter)
+    const x = rel.dot(tangent)
+    const y = rel.dot(bitangent)
+    maxExtent = Math.max(maxExtent, Math.abs(x), Math.abs(y))
+    return [x, y] as const
+  })
+
+  const uvScale = uvRadius / maxExtent
+  const uvs: Array<[number, number]> = localCoords.map(([x, y]) => [
+    Math.min(0.96, Math.max(0.04, 0.5 + x * uvScale)),
+    Math.min(0.96, Math.max(0.04, 0.5 + y * uvScale)),
+  ])
+
+  return { uvs, tangent, bitangent }
+}
+
 function buildTrianglePolyhedronData(raw: THREE.BufferGeometry, dieLabelOffset = 1): DieGeometryData {
   const geometry = raw.index ? raw.toNonIndexed() : raw
   if (raw.index) raw.dispose()
@@ -94,7 +132,7 @@ export function buildDieGeometryData(dieType: DieType): DieGeometryData {
   }
 
   if (dieType === 'd10' || dieType === 'd10-tens') {
-    // Mathematical pentagonal trapezohedron (10 coplanar kite facets)
+    // Mathematical pentagonal trapezohedron (10 coplanar kite facets with isotropic planar UVs)
     const H = 1.28
     const R = 1.08
     const cos36 = Math.cos(Math.PI / 5)
@@ -142,8 +180,23 @@ export function buildDieGeometryData(dieType: DieType): DieGeometryData {
         .normalize()
       if (n.dot(center) < 0) n.negate()
 
-      pushTri(topApex, p2, p1, [0.5, 0.94], [0.1, 0.44], [0.5, 0.08])
-      pushTri(topApex, p1, p0, [0.5, 0.94], [0.5, 0.08], [0.9, 0.44])
+      // Barycenter of the wide zone of the kite (biased away from narrow topApex)
+      const visualCenter = new THREE.Vector3()
+        .addScaledVector(topApex, 0.24)
+        .addScaledVector(p0, 0.28)
+        .addScaledVector(p1, 0.20)
+        .addScaledVector(p2, 0.28)
+
+      const { uvs: kiteUvs, bitangent } = projectPlanarFacet(
+        [topApex, p2, p1, p0],
+        n,
+        topApex,
+        visualCenter,
+        0.42,
+      )
+
+      pushTri(topApex, p2, p1, kiteUvs[0], kiteUvs[1], kiteUvs[2])
+      pushTri(topApex, p1, p0, kiteUvs[0], kiteUvs[2], kiteUvs[3])
       geo.addGroup(vertStart, 6, faces.length)
       vertStart += 6
 
@@ -153,7 +206,7 @@ export function buildDieGeometryData(dieType: DieType): DieGeometryData {
         label,
         value: v,
         normal: n,
-        up: new THREE.Vector3().subVectors(topApex, p1).normalize(),
+        up: bitangent,
       })
     }
 
@@ -169,8 +222,23 @@ export function buildDieGeometryData(dieType: DieType): DieGeometryData {
         .normalize()
       if (n.dot(center) < 0) n.negate()
 
-      pushTri(botApex, p0, p1, [0.5, 0.94], [0.1, 0.44], [0.5, 0.08])
-      pushTri(botApex, p1, p2, [0.5, 0.94], [0.5, 0.08], [0.9, 0.44])
+      // Barycenter of the wide zone of the lower kite
+      const visualCenter = new THREE.Vector3()
+        .addScaledVector(botApex, 0.24)
+        .addScaledVector(p0, 0.28)
+        .addScaledVector(p1, 0.20)
+        .addScaledVector(p2, 0.28)
+
+      const { uvs: kiteUvs, bitangent } = projectPlanarFacet(
+        [botApex, p0, p1, p2],
+        n,
+        botApex,
+        visualCenter,
+        0.42,
+      )
+
+      pushTri(botApex, p0, p1, kiteUvs[0], kiteUvs[1], kiteUvs[2])
+      pushTri(botApex, p1, p2, kiteUvs[0], kiteUvs[2], kiteUvs[3])
       geo.addGroup(vertStart, 6, faces.length)
       vertStart += 6
 
@@ -180,7 +248,7 @@ export function buildDieGeometryData(dieType: DieType): DieGeometryData {
         label,
         value: v,
         normal: n,
-        up: new THREE.Vector3().subVectors(botApex, p1).normalize(),
+        up: bitangent,
       })
     }
 
@@ -255,9 +323,9 @@ export function buildDieGeometryData(dieType: DieType): DieGeometryData {
   }
 
   if (dieType === 'd16') {
-    // 16-sided octagonal dipyramid (8 upper + 8 lower triangular facets)
-    const H = 1.34
-    const R = 1.08
+    // 16-sided octagonal dipyramid (8 upper + 8 lower triangular facets with orthonormal planar UVs)
+    const H = 1.18
+    const R = 1.16
     const topApex = new THREE.Vector3(0, H, 0)
     const botApex = new THREE.Vector3(0, -H, 0)
     const ring: THREE.Vector3[] = []
@@ -274,19 +342,26 @@ export function buildDieGeometryData(dieType: DieType): DieGeometryData {
     const pushFace = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, val: number) => {
       const vertStart = positions.length / 3
       positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z)
-      uvs.push(0.5, 0.88, 0.14, 0.18, 0.86, 0.18)
 
       const center = new THREE.Vector3().add(a).add(b).add(c).divideScalar(3)
       const n = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a)).normalize()
       if (n.dot(center) < 0) n.negate()
-      const up = new THREE.Vector3().subVectors(a, new THREE.Vector3().add(b).add(c).multiplyScalar(0.5)).normalize()
+
+      // Barycenter of the wide zone near the base chord
+      const visualCenter = new THREE.Vector3()
+        .addScaledVector(a, 0.26)
+        .addScaledVector(b, 0.37)
+        .addScaledVector(c, 0.37)
+
+      const { uvs: triUvs, bitangent } = projectPlanarFacet([a, b, c], n, a, visualCenter, 0.44)
+      uvs.push(triUvs[0][0], triUvs[0][1], triUvs[1][0], triUvs[1][1], triUvs[2][0], triUvs[2][1])
 
       geo.addGroup(vertStart, 3, faces.length)
       faces.push({
         label: formatDieValueLabel(val),
         value: val,
         normal: n,
-        up,
+        up: bitangent,
       })
     }
 
@@ -310,7 +385,24 @@ export function buildDieGeometryData(dieType: DieType): DieGeometryData {
 }
 
 /**
- * Computes the exact rotation quaternion that places the chosen value's face normal toward +Z.
+ * Computes the exact rotation quaternion aligning a facet's local orthonormal basis
+ * (tangent, bitangent, normal) directly onto screen space (+X, +Y, +Z).
+ */
+export function alignFaceToCamera(
+  normal: THREE.Vector3,
+  bitangent: THREE.Vector3,
+): THREE.Quaternion {
+  const n = normal.clone().normalize()
+  const rawB = bitangent.clone().sub(n.clone().multiplyScalar(bitangent.dot(n)))
+  const b = rawB.lengthSq() > 1e-6 ? rawB.normalize() : new THREE.Vector3(0, 1, 0)
+  const t = new THREE.Vector3().crossVectors(b, n).normalize()
+  const rotMat = new THREE.Matrix4().makeBasis(t, b, n).transpose()
+  return new THREE.Quaternion().setFromRotationMatrix(rotMat)
+}
+
+/**
+ * Computes the exact rotation quaternion that places the chosen value's face normal toward +Z
+ * and its equilibrium bitangent upright toward +Y.
  */
 export function computeTargetDieQuaternion(dieType: DieType, value: number): THREE.Quaternion {
   const { geometry, faces } = buildDieGeometryData(dieType)
@@ -322,18 +414,7 @@ export function computeTargetDieQuaternion(dieType: DieType, value: number): THR
     faces.find((f) => f.value === fallbackVal) ??
     faces[0]
 
-  const zForward = new THREE.Vector3(0, 0, 1)
-  const qAlign = new THREE.Quaternion().setFromUnitVectors(match.normal.clone().normalize(), zForward)
-
-  const rotatedUp = match.up.clone().applyQuaternion(qAlign)
-  rotatedUp.z = 0
-  if (rotatedUp.lengthSq() > 1e-4) {
-    rotatedUp.normalize()
-    const angle = Math.atan2(rotatedUp.x, rotatedUp.y)
-    const qTwist = new THREE.Quaternion().setFromAxisAngle(zForward, angle)
-    qAlign.premultiply(qTwist)
-  }
-  return qAlign
+  return alignFaceToCamera(match.normal, match.up)
 }
 
 /**

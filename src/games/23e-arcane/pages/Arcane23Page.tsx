@@ -1,11 +1,11 @@
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { isLocalDemoMode } from '@/lib/supabase'
 import { DEMO_GUEST_ID } from '@/lib/localSupabase'
 import { useGenericGame } from '../../_shared/useGenericGame'
 import {
-  advanceToNextRound,
+  advancePresentationStep,
   buildDefaultPromptResponse,
   canPlayerChooseTarot,
   createInitialArcane23State,
@@ -19,11 +19,13 @@ import {
 import { GameStatus } from '../components/GameStatus'
 import { GameTable } from '../components/GameTable'
 import { ActionBar } from '../components/ActionBar'
+import { TarotDetailModal, type InspectedTarotInfo } from '../components/TarotDetailModal'
 
 export function Arcane23Page() {
   const { roomId } = useParams<{ roomId: string }>()
   const navigate = useNavigate()
   const { user } = useAuth()
+  const [inspectedTarot, setInspectedTarot] = useState<InspectedTarotInfo | null>(null)
 
   const createInitial = useCallback(
     (players: string[], hostId: string) => createInitialArcane23State(players, hostId),
@@ -51,19 +53,25 @@ export function Arcane23Page() {
     }
   }, [roomId, navigate])
 
-  // Automated Demo Guest AI response in Local Demo solo rooms so a solo host can play full matches effortlessly
+  // Automated Demo Guest AI response in Local Demo solo rooms so a solo host can play full matches seamlessly
   useEffect(() => {
     if (!isLocalDemoMode || !isHost || !gameState || isUpdating) return
     const guest = gameState.playersRecord[DEMO_GUEST_ID]
     if (!guest) return
 
     let timer: number | undefined
-    if (gameState.phase === 'CHOOSING' && guest.choice === null) {
+    if (gameState.presentationStep === 'CHOOSING' && guest.choice === null) {
       const hostRec = gameState.playersRecord[user?.id ?? '']
       if (hostRec?.choice !== null) {
         timer = window.setTimeout(() => {
           const allowTarot = canPlayerChooseTarot(gameState, DEMO_GUEST_ID)
-          const aiChoice: DrawChoice = allowTarot && Math.random() < 0.35 ? 'tarot' : 'classic'
+          const emp = gameState.activePersistentArcana.emperor[DEMO_GUEST_ID]
+          const aiChoice: DrawChoice =
+            emp?.currentTurnMode === 'force_tarot'
+              ? 'tarot'
+              : allowTarot && Math.random() < 0.35
+                ? 'tarot'
+                : 'classic'
           const next = submitDrawChoice(gameState, DEMO_GUEST_ID, aiChoice)
           void updateGameState({ ...next, markRoomFinished: next.status === 'finished' })
         }, 450)
@@ -125,35 +133,61 @@ export function Arcane23Page() {
     })
   }
 
-  const handleNextRound = async () => {
-    const nextState = advanceToNextRound(gameState)
-    await updateGameState(nextState)
+  const handleAdvanceStep = async () => {
+    if (isUpdating || gameState.pendingPrompts.length > 0) return
+    if (
+      gameState.presentationStep === 'CHOOSING' ||
+      gameState.presentationStep === 'EMPEROR_CHOICE' ||
+      gameState.phase === 'FINISHED'
+    ) {
+      return
+    }
+    const nextState = advancePresentationStep(gameState)
+    const finished = nextState.status === 'finished'
+    await updateGameState({ ...nextState, markRoomFinished: finished })
     await emitEvent({
-      type: 'turn_changed',
-      payload: { action: 'next_round', roundNumber: nextState.roundNumber },
+      type: finished ? 'game_finished' : 'turn_changed',
+      payload: {
+        action: 'advance_step',
+        presentationStep: nextState.presentationStep,
+        roundNumber: nextState.roundNumber,
+      },
     })
   }
+
+  const canClickAnywhereToContinue =
+    inspectedTarot === null &&
+    gameState.pendingPrompts.length === 0 &&
+    (gameState.presentationStep === 'CLASSIC_REVEAL' ||
+      gameState.presentationStep === 'TAROT_1' ||
+      gameState.presentationStep === 'TAROT_2')
 
   const selfThemes = user ? playerThemes[user.id] : undefined
 
   return (
-    <div className="flex flex-col min-h-[calc(100vh-4rem)] bg-gradient-to-br from-purple-950/70 via-slate-950 to-black text-white pb-6">
+    <div
+      data-testid="click-anywhere-continue"
+      onClick={() => {
+        if (canClickAnywhereToContinue) {
+          void handleAdvanceStep()
+        }
+      }}
+      className={
+        canClickAnywhereToContinue
+          ? 'flex flex-col min-h-[calc(100vh-4rem)] bg-gradient-to-br from-purple-950/70 via-slate-950 to-black text-white pb-6 cursor-pointer'
+          : 'flex flex-col min-h-[calc(100vh-4rem)] bg-gradient-to-br from-purple-950/70 via-slate-950 to-black text-white pb-6'
+      }
+    >
       <GameStatus
         gameState={gameState}
         currentUserId={user?.id}
         playerProfiles={playerProfiles}
         potYen={roomPotYen}
+        onInspectTarot={(info) => setInspectedTarot(info)}
         onBackToLobby={() => navigate(`/room/${roomId}`)}
       />
 
-      <GameTable
-        gameState={gameState}
-        currentUserId={user?.id}
-        playerProfiles={playerProfiles}
-        playerThemes={playerThemes}
-      />
-
-      <div className="px-4">
+      <div className="px-4 pt-4">
         <ActionBar
           gameState={gameState}
           currentUserId={user?.id}
@@ -163,11 +197,25 @@ export function Arcane23Page() {
           themes={selfThemes}
           onSubmitChoice={(c) => void handleChoice(c)}
           onResolvePrompt={(p, r) => void handleResolvePrompt(p, r)}
-          onNextRound={() => void handleNextRound()}
+          onAdvanceStep={() => void handleAdvanceStep()}
+          onInspectTarot={(info) => setInspectedTarot(info)}
           onRematch={() => void resetMatch()}
           onBackToLobby={() => navigate(`/room/${roomId}`)}
         />
       </div>
+
+      <GameTable
+        gameState={gameState}
+        currentUserId={user?.id}
+        playerProfiles={playerProfiles}
+        playerThemes={playerThemes}
+        onInspectTarot={(info) => setInspectedTarot(info)}
+      />
+
+      <TarotDetailModal
+        inspected={inspectedTarot}
+        onClose={() => setInspectedTarot(null)}
+      />
     </div>
   )
 }

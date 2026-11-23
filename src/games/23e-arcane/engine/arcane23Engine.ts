@@ -1,20 +1,312 @@
-import { createStandardDeck, type Card, type Rank, type Suit } from '@/games/_shared/deck'
+import { createStandardDeck, type Card, type Rank } from '@/games/_shared/deck'
 import { flipCoin, rollDie, shuffleArray, type RngFn } from '@/games/_shared/randomUtils'
 import type { BaseGameState, GamePlayer } from '@/types/game'
 
 export type Arcane23Phase = 'CHOOSING' | 'INTERACTION' | 'ROUND_END' | 'FINISHED'
+export type PresentationStep =
+  | 'EMPEROR_CHOICE'
+  | 'CHOOSING'
+  | 'CLASSIC_REVEAL'
+  | 'TAROT_1'
+  | 'TAROT_2'
+  | 'RESOLVED'
 export type DrawChoice = 'classic' | 'tarot'
 export type EmperorMode = 'force_tarot' | 'forbid_tarot'
 
+export interface ArcanaRuleSpec {
+  number: number
+  roman: string
+  title: string
+  priorityRank: number
+  priorityLabel: string
+  shortEffect: string
+  detailedEffect: string
+  requiresInteractivePrompt: boolean
+}
+
+export const ARCANA_RULES_CATALOG: Record<number, ArcanaRuleSpec> = {
+  666: {
+    number: 666,
+    roman: '666',
+    title: 'W. D. Gaster — L’Anomalie du Vide',
+    priorityRank: 0,
+    priorityLabel: 'Priorité 0 (Suprême)',
+    shortEffect: '1/666 (3d10 = 6-6-6). Désigne immédiatement le vainqueur de la partie.',
+    detailedEffect:
+      'Anomalie dimensionnelle hors paquet (1/666 avant chaque tirage de Tarot). Déclenche un glitch et permet au tireur de désigner immédiatement le gagnant de toute la partie.',
+    requiresInteractivePrompt: true,
+  },
+  13: {
+    number: 13,
+    roman: 'XIII',
+    title: 'L’Arcane sans nom (Death)',
+    priorityRank: 1,
+    priorityLabel: 'Priorité 1',
+    shortEffect: 'Le tireur perd instantanément la partie.',
+    detailedEffect:
+      'Fatalité absolue : le joueur qui pioche XIII. L’Arcane sans nom perd instantanément la partie, quel que soit le score.',
+    requiresInteractivePrompt: false,
+  },
+  15: {
+    number: 15,
+    roman: 'XV',
+    title: 'Le Diable (Devil)',
+    priorityRank: 2,
+    priorityLabel: 'Priorité 2',
+    shortEffect: 'Annule la manche (0 pt), active la Mort Subite et reset les cooldowns Tarot.',
+    detailedEffect:
+      'Annule la manche en cours (0 point), déclenche la Mort Subite (le prochain vainqueur d’un duel gagne toute la partie) et réinitialise immédiatement le cooldown Tarot des deux joueurs pour le tour suivant.',
+    requiresInteractivePrompt: false,
+  },
+  21: {
+    number: 21,
+    roman: 'XXI',
+    title: 'Le Monde (World)',
+    priorityRank: 3,
+    priorityLabel: 'Priorité 3',
+    shortEffect: 'Victoire immédiate de la manche + remélange des défausses.',
+    detailedEffect:
+      'Accorde immédiatement la victoire de la manche (2 manches si III. L’Impératrice est active) et remélange la défausse classique du tireur dans son deck ainsi que la défausse de Tarot dans la pile de Tarot.',
+    requiresInteractivePrompt: false,
+  },
+  0: {
+    number: 0,
+    roman: '0',
+    title: 'Le Mat (The Fool)',
+    priorityRank: 4,
+    priorityLabel: 'Priorité 4',
+    shortEffect: 'Inverse la hiérarchie (2 bat As). Ignoré face à La Roue ou Le Pape.',
+    detailedEffect:
+      'Inverse la hiérarchie des cartes classiques pour cette manche : la carte la plus faible (2) bat la plus forte (As). Sans effet si X. La Roue de la Fortune ou V. Le Pape est joué au même tour.',
+    requiresInteractivePrompt: false,
+  },
+  5: {
+    number: 5,
+    roman: 'V',
+    title: 'Le Pape (Hierophant)',
+    priorityRank: 5,
+    priorityLabel: 'Priorité 5',
+    shortEffect: 'Annule le duel ; les 2 joueurs gagnent chacun 1 manche.',
+    detailedEffect:
+      'Annule le duel classique (et rend Le Mat / Tempérance sans effet) : les deux joueurs gagnent chacun 1 manche immédiatement.',
+    requiresInteractivePrompt: false,
+  },
+  10: {
+    number: 10,
+    roman: 'X',
+    title: 'La Roue de la Fortune',
+    priorityRank: 5,
+    priorityLabel: 'Priorité 5',
+    shortEffect: 'L’adversaire appelle Pile/Face sur la pièce 3D : le gagnant prend 2 manches.',
+    detailedEffect:
+      'Annule le duel classique (prime sur Le Mat et Tempérance). L’adversaire choisit Pile ou Face, le tireur lance la pièce 3D et le gagnant du lancer remporte 2 manches.',
+    requiresInteractivePrompt: true,
+  },
+  14: {
+    number: 14,
+    roman: 'XIV',
+    title: 'Tempérance (Temperance)',
+    priorityRank: 5,
+    priorityLabel: 'Priorité 5',
+    shortEffect: 'Moyenne des 2 cartes : entière = tireur gagne ; non entière = adversaire.',
+    detailedEffect:
+      'Calcule la moyenne des deux cartes classiques (J=11, Q=12, K=13, A=14). Si la moyenne est entière (somme paire), le tireur gagne ; sinon l’adversaire gagne. Effet inversé lorsqu’elle est combinée avec 0. Le Mat.',
+    requiresInteractivePrompt: false,
+  },
+  3: {
+    number: 3,
+    roman: 'III',
+    title: 'L’Impératrice (Empress)',
+    priorityRank: 6,
+    priorityLabel: 'Priorité 6',
+    shortEffect: 'Le vainqueur de la manche remporte 2 manches au lieu d’une.',
+    detailedEffect:
+      'Double l’enjeu de la manche : le vainqueur de cette manche remporte 2 manches gagnées au lieu d’une.',
+    requiresInteractivePrompt: false,
+  },
+  8: {
+    number: 8,
+    roman: 'VIII',
+    title: 'La Justice (Justice)',
+    priorityRank: 7,
+    priorityLabel: 'Priorité 7',
+    shortEffect: 'Le joueur en tête redescend au score de manches de son adversaire.',
+    detailedEffect:
+      'Avant la résolution du duel, le joueur en tête redescend immédiatement au même nombre de manches gagnées que son adversaire.',
+    requiresInteractivePrompt: false,
+  },
+  16: {
+    number: 16,
+    roman: 'XVI',
+    title: 'La Maison Dieu (Tower)',
+    priorityRank: 7,
+    priorityLabel: 'Priorité 7',
+    shortEffect: 'Les 2 joueurs perdent immédiatement 2 manches gagnées (min 0).',
+    detailedEffect:
+      'Choc soudain appliqué avant le duel : les deux joueurs perdent immédiatement 2 manches gagnées (minimum 0).',
+    requiresInteractivePrompt: false,
+  },
+  1: {
+    number: 1,
+    roman: 'I',
+    title: 'Le Bateleur (Magician)',
+    priorityRank: 8,
+    priorityLabel: 'Priorité 8',
+    shortEffect: 'Regarde les 3 premières cartes, en joue 1 et réordonne les 2 autres.',
+    detailedEffect:
+      'Consulte les 3 premières cartes de son deck classique, choisit laquelle jouer pour ce tour et replace les 2 autres sur le dessus du deck dans l’ordre désiré.',
+    requiresInteractivePrompt: true,
+  },
+  6: {
+    number: 6,
+    roman: 'VI',
+    title: 'L’Amoureux (Lovers)',
+    priorityRank: 8,
+    priorityLabel: 'Priorité 8',
+    shortEffect: 'Tire 2 cartes : 2 chiffres = somme (max 10) ; sinon garde la plus forte.',
+    detailedEffect:
+      'Pioche 2 cartes classiques : si ce sont deux cartes chiffrées (2–10), additionne leurs valeurs (plafonné à 10) ; si au moins une figure (J, Q, K, A) sort, conserve uniquement la plus forte.',
+    requiresInteractivePrompt: false,
+  },
+  7: {
+    number: 7,
+    roman: 'VII',
+    title: 'Le Chariot (Chariot)',
+    priorityRank: 8,
+    priorityLabel: 'Priorité 8',
+    shortEffect: 'Sa carte gagne +1 en puissance par manche déjà remportée.',
+    detailedEffect:
+      'Pioche 1 carte classique qui gagne +1 de puissance bonus pour chaque manche déjà remportée par le tireur.',
+    requiresInteractivePrompt: false,
+  },
+  9: {
+    number: 9,
+    roman: 'IX',
+    title: 'L’Ermite (Hermit)',
+    priorityRank: 8,
+    priorityLabel: 'Priorité 8',
+    shortEffect: 'Observe la carte adverse (hors Lune/Tarot), puis choisit de jouer ou d’annuler.',
+    detailedEffect:
+      'Observe la carte classique jouée par l’adversaire (masquée si XVIII. La Lune est active ou si l’adversaire a aussi pris le Tarot), puis décide toujours soit de disputer la manche en piochant sa carte classique, soit d’annuler le tour (manche nulle).',
+    requiresInteractivePrompt: true,
+  },
+  11: {
+    number: 11,
+    roman: 'XI',
+    title: 'La Force (Strength)',
+    priorityRank: 8,
+    priorityLabel: 'Priorité 8',
+    shortEffect: 'Peut sacrifier 1 manche gagnée après pioche pour forger un Joker imbattable.',
+    detailedEffect:
+      'Après avoir pioché sa carte classique, peut sacrifier 1 manche gagnée (si score ≥ 1) pour transformer sa carte en Joker imbattable pour ce duel.',
+    requiresInteractivePrompt: true,
+  },
+  12: {
+    number: 12,
+    roman: 'XII',
+    title: 'Le Pendu (Hanged Man)',
+    priorityRank: 9,
+    priorityLabel: 'Priorité 9',
+    shortEffect: 'Échange obligatoirement sa carte classique avec celle de l’adversaire.',
+    detailedEffect:
+      'Une fois les deux cartes classiques révélées, échange obligatoirement la carte classique du tireur avec celle de l’adversaire.',
+    requiresInteractivePrompt: false,
+  },
+  2: {
+    number: 2,
+    roman: 'II',
+    title: 'La Papesse (High Priestess)',
+    priorityRank: 10,
+    priorityLabel: 'Priorité 10',
+    shortEffect: 'Regarde et réordonne les 3 premières cartes du deck adverse.',
+    detailedEffect:
+      'Consulte les 3 premières cartes du deck classique adverse et les replace sur le dessus dans l’ordre choisi. Reste visible au coin du plateau tant que ces cartes sont sur le dessus.',
+    requiresInteractivePrompt: true,
+  },
+  4: {
+    number: 4,
+    roman: 'IV',
+    title: 'L’Empereur (Emperor)',
+    priorityRank: 10,
+    priorityLabel: 'Priorité 10',
+    shortEffect: 'Au début des 2 prochains tours, choisit d’interdire ou de forcer le Tarot adverse.',
+    detailedEffect:
+      'Pose un décret actif pour les 2 prochains tours (hors tour actuel). Au début de chacun de ces 2 tours, le détenteur de L’Empereur choisit librement pour ce tour précis d’interdire le Tarot ou de forcer l’adversaire à piocher dans le Tarot (outrepasse le cooldown).',
+    requiresInteractivePrompt: false,
+  },
+  17: {
+    number: 17,
+    roman: 'XVII',
+    title: 'L’Étoile (Star)',
+    priorityRank: 10,
+    priorityLabel: 'Priorité 10',
+    shortEffect: 'Nomme un chiffre (2–10) : s’il sort aux 2 prochains tours, +2 manches.',
+    detailedEffect:
+      'Nomme un chiffre entre 2 et 10. Dès que cette valeur est jouée par l’un ou l’autre joueur au cours des 2 prochains tours (hors tour actuel), le tireur gagne immédiatement +2 manches et l’effet s’éteint.',
+    requiresInteractivePrompt: true,
+  },
+  18: {
+    number: 18,
+    roman: 'XVIII',
+    title: 'La Lune (Moon)',
+    priorityRank: 10,
+    priorityLabel: 'Priorité 10',
+    shortEffect: 'Toutes les cartes classiques restent face cachée jusqu’à la résolution.',
+    detailedEffect:
+      'Pour le reste de la partie, toutes les cartes classiques sont jouées face cachée jusqu’à la résolution complète du tour (masque aussi la carte adverse à IX. L’Ermite).',
+    requiresInteractivePrompt: false,
+  },
+  19: {
+    number: 19,
+    roman: 'XIX',
+    title: 'Le Soleil (Sun)',
+    priorityRank: 10,
+    priorityLabel: 'Priorité 10',
+    shortEffect: 'Révèle les 3 prochaines cartes sur le dessus des deux decks classiques.',
+    detailedEffect:
+      'Révèle uniquement les 3 prochaines cartes présentes sur le dessus de chacun des deux decks classiques au moment de son activation. À chaque pioche, le nombre de cartes visibles diminue (3 → 2 → 1 → 0) jusqu’à disparaître.',
+    requiresInteractivePrompt: false,
+  },
+  20: {
+    number: 20,
+    roman: 'XX',
+    title: 'Le Jugement (Judgement)',
+    priorityRank: 11,
+    priorityLabel: 'Priorité Variable',
+    shortEffect: 'Prévisualise et réactive un Arcane de la défausse Tarot avec sa priorité d’origine.',
+    detailedEffect:
+      'Réactive immédiatement l’effet de n’importe quelle carte présente dans la défausse de Tarot (hors Jugement et Gaster) en adoptant son rang de priorité, sans sauter d’étape. Si la défausse est vide, sans effet (pioche 1 carte classique).',
+    requiresInteractivePrompt: true,
+  },
+}
+
+export function getArcanaRuleSpec(number: number): ArcanaRuleSpec {
+  return ARCANA_RULES_CATALOG[number] ?? ARCANA_RULES_CATALOG[0]
+}
+
 export interface EmperorEffect {
-  mode: EmperorMode
-  remainingTurns: number
   ownerId: string
+  targetId: string
+  remainingTurns: number
+  currentTurnMode: EmperorMode | null
+  activatedRound: number
 }
 
 export interface StarEffect {
   targetNumber: number
   remainingTurns: number
+  activatedRound: number
+}
+
+export interface PapesseCornerEffect {
+  ownerId: string
+  targetId: string
+  remainingDraws: number
+}
+
+export interface SunCornerEffect {
+  ownerId: string
+  revealedCardsRemaining: Record<string, number>
 }
 
 export type Arcane23Prompt =
@@ -47,13 +339,16 @@ export type Arcane23Prompt =
       id: string
       type: 'ERMITE_DECIDE'
       playerId: string
-      peekedCard: Card
+      observedOpponentCard: Card | null
+      hiddenByMoon: boolean
+      opponentChoseTarot: boolean
     }
   | {
       id: string
       type: 'FORCE_SACRIFICE'
       playerId: string
       currentScore: number
+      drawnCard: Card
     }
   | {
       id: string
@@ -71,12 +366,13 @@ export type Arcane23Prompt =
       type: 'EMPEROR_CHOOSE_LOCK'
       playerId: string
       opponentId: string
+      remainingTurns: number
     }
 
 export type Arcane23PromptResponse =
   | { type: 'JUDGMENT_COPY_DISCARD'; targetArcanum: number | null }
   | { type: 'GASTER_CHOOSE_WINNER'; chosenWinnerId: string }
-  | { type: 'BATELEUR_PICK_ORDER'; chosenCardId: string; remainingOrder: [string, string] | string[] }
+  | { type: 'BATELEUR_PICK_ORDER'; chosenCardId: string; remainingOrder: string[] }
   | { type: 'PAPESSE_REORDER_OPPONENT'; orderedCardIds: string[] }
   | { type: 'ERMITE_DECIDE'; decision: 'play' | 'cancel' }
   | { type: 'FORCE_SACRIFICE'; sacrifice: boolean }
@@ -94,12 +390,14 @@ export interface Arcane23PlayerState {
   choice: DrawChoice | null
   drawnClassic: Card | null
   drawnClassicExtra: Card | null
+  loversCappedSum: number | null
+  chariotBonus: number
   drawnTarot: number | null
   effectiveTarot: number | null
-  judgmentBonusPower: number
+  tarotRevealed: boolean
+  tarotStepResolved: boolean
   gasterRoll: [number, number, number] | null
   forceJokerSecured: boolean
-  bustedDiable: boolean
   ermiteCancelled: boolean
 }
 
@@ -109,8 +407,8 @@ export interface Arcane23RoundOutcome {
   reason: string
   pointsAwarded: Record<string, number>
   cancelled: boolean
-  hiddenByMoon: boolean
   usedGaster: boolean
+  starTriggered?: { ownerId: string; matchedNumber: number }
   wheelFlip?: {
     callerId: string
     call: 'heads' | 'tails'
@@ -121,14 +419,18 @@ export interface Arcane23RoundOutcome {
 
 export interface Arcane23PersistentBoard {
   moon: boolean
-  sun: boolean
+  moonOwnerId: string | null
+  sun: SunCornerEffect | null
   suddenDeath: boolean
+  papesse: PapesseCornerEffect | null
   emperor: Record<string, EmperorEffect | null>
   star: Record<string, StarEffect | null>
 }
 
 export interface Arcane23State extends BaseGameState {
   phase: Arcane23Phase
+  presentationStep: PresentationStep
+  tarotDrawOrder: string[]
   playerIds: string[]
   playersRecord: Record<string, Arcane23PlayerState>
   targetRoundsToWin: number
@@ -137,19 +439,8 @@ export interface Arcane23State extends BaseGameState {
   tarotDiscard: number[]
   activePersistentArcana: Arcane23PersistentBoard
   pendingPrompts: Arcane23Prompt[]
+  pendingWheelFlip: Arcane23RoundOutcome['wheelFlip'] | null
   roundOutcome: Arcane23RoundOutcome | null
-  hiddenOutcomeSnapshot: {
-    roundNumber: number
-    winnerId: string | null
-    reason: string
-    summary: string
-  } | null
-  lastRevealedMoonOutcome: {
-    roundNumber: number
-    winnerId: string | null
-    reason: string
-    summary: string
-  } | null
   historyLog: string[]
 }
 
@@ -178,24 +469,54 @@ export function getClassicCardNumericValue(card: Card): number {
   return RANK_VALUES[card.rank] ?? 0
 }
 
-export function isRedSuit(suit: Suit): boolean {
-  return suit === 'hearts' || suit === 'diamonds'
+export function getPlayerEffectiveClassicScore(player: Arcane23PlayerState): number {
+  if (player.loversCappedSum !== null) {
+    return player.loversCappedSum + player.chariotBonus
+  }
+  const base = player.drawnClassic ? getClassicCardNumericValue(player.drawnClassic) : 0
+  return base + player.chariotBonus
 }
 
 function createAllTarotNumbers(rng: RngFn = Math.random): number[] {
-  const nums = Array.from({ length: 22 }, (_, i) => i)
-  return shuffleArray(nums, rng)
+  return shuffleArray(
+    Array.from({ length: 22 }, (_, i) => i),
+    rng,
+  )
+}
+
+function consumeSunRevealSlot(state: Arcane23State, playerId: string, count = 1): void {
+  const sun = state.activePersistentArcana.sun
+  if (!sun) return
+  const cur = sun.revealedCardsRemaining[playerId] ?? 0
+  if (cur > 0) {
+    sun.revealedCardsRemaining[playerId] = Math.max(0, cur - count)
+  }
+  const anyRemaining = Object.values(sun.revealedCardsRemaining).some((n) => n > 0)
+  if (!anyRemaining) {
+    state.activePersistentArcana.sun = null
+  }
 }
 
 function drawFromClassicDeck(
-  player: Arcane23PlayerState,
+  state: Arcane23State,
+  playerId: string,
   rng: RngFn = Math.random,
 ): Card | null {
+  const player = state.playersRecord[playerId]
   if (player.classicDeck.length === 0 && player.classicDiscard.length > 0) {
     player.classicDeck = shuffleArray(player.classicDiscard, rng)
     player.classicDiscard = []
   }
-  return player.classicDeck.shift() ?? null
+  const card = player.classicDeck.shift() ?? null
+  if (card) {
+    if (state.activePersistentArcana.papesse?.targetId === playerId) {
+      const nextRem = state.activePersistentArcana.papesse.remainingDraws - 1
+      state.activePersistentArcana.papesse =
+        nextRem > 0 ? { ...state.activePersistentArcana.papesse, remainingDraws: nextRem } : null
+    }
+    consumeSunRevealSlot(state, playerId, 1)
+  }
+  return card
 }
 
 function ensureClassicDeckCount(
@@ -210,10 +531,7 @@ function ensureClassicDeckCount(
   }
 }
 
-function drawFromTarotDeck(
-  state: Arcane23State,
-  rng: RngFn = Math.random,
-): number | null {
+function drawFromTarotDeck(state: Arcane23State, rng: RngFn = Math.random): number | null {
   if (state.tarotDeck.length === 0 && state.tarotDiscard.length > 0) {
     state.tarotDeck = shuffleArray(state.tarotDiscard, rng)
     state.tarotDiscard = []
@@ -226,12 +544,6 @@ function getOpponentId(state: Arcane23State, playerId: string): string {
   return state.playerIds.find((id) => id !== playerId) ?? playerId
 }
 
-export function getPlayerEffectiveClassicScore(player: Arcane23PlayerState): number {
-  const primary = player.drawnClassic ? getClassicCardNumericValue(player.drawnClassic) : 0
-  const extra = player.drawnClassicExtra ? getClassicCardNumericValue(player.drawnClassicExtra) : 0
-  return primary + extra + player.judgmentBonusPower
-}
-
 export function getTarotChoiceConstraint(
   state: Arcane23State,
   playerId: string,
@@ -241,19 +553,19 @@ export function getTarotChoiceConstraint(
     return { canChooseClassic: false, canChooseTarot: false, reason: 'Joueur introuvable' }
   }
   const emp = state.activePersistentArcana.emperor[playerId]
-  if (emp && emp.remainingTurns > 0) {
-    if (emp.mode === 'forbid_tarot') {
+  if (emp && emp.currentTurnMode !== null) {
+    if (emp.currentTurnMode === 'forbid_tarot') {
       return {
         canChooseClassic: true,
         canChooseTarot: false,
-        reason: `L'Empereur interdit le Tarot (${emp.remainingTurns} tour(s))`,
+        reason: 'L’Empereur interdit le Tarot pour ce tour',
       }
     }
-    if (emp.mode === 'force_tarot') {
+    if (emp.currentTurnMode === 'force_tarot') {
       return {
         canChooseClassic: false,
         canChooseTarot: true,
-        reason: `L'Empereur impose le Tarot (${emp.remainingTurns} tour(s))`,
+        reason: 'L’Empereur impose le Tarot pour ce tour',
       }
     }
   }
@@ -297,12 +609,14 @@ export function createInitialArcane23State(
       choice: null,
       drawnClassic: null,
       drawnClassicExtra: null,
+      loversCappedSum: null,
+      chariotBonus: 0,
       drawnTarot: null,
       effectiveTarot: null,
-      judgmentBonusPower: 0,
+      tarotRevealed: false,
+      tarotStepResolved: false,
       gasterRoll: null,
       forceJokerSecured: false,
-      bustedDiable: false,
       ermiteCancelled: false,
     }
   }
@@ -310,6 +624,8 @@ export function createInitialArcane23State(
   return {
     status: 'player_turns',
     phase: 'CHOOSING',
+    presentationStep: 'CHOOSING',
+    tarotDrawOrder: [],
     players,
     playerIds: seated,
     currentTurnUserId: hostId ?? seated[0] ?? null,
@@ -321,15 +637,16 @@ export function createInitialArcane23State(
     tarotDiscard: [],
     activePersistentArcana: {
       moon: false,
-      sun: false,
+      moonOwnerId: null,
+      sun: null,
       suddenDeath: false,
+      papesse: null,
       emperor: Object.fromEntries(seated.map((id) => [id, null])),
       star: Object.fromEntries(seated.map((id) => [id, null])),
     },
     pendingPrompts: [],
+    pendingWheelFlip: null,
     roundOutcome: null,
-    hiddenOutcomeSnapshot: null,
-    lastRevealedMoonOutcome: null,
     historyLog: ['Manche 1 — Choisissez secrètement entre votre paquet de 52 cartes et le Tarot.'],
   }
 }
@@ -338,188 +655,157 @@ function cloneState(state: Arcane23State): Arcane23State {
   return JSON.parse(JSON.stringify(state)) as Arcane23State
 }
 
-function ensureBaseClassicDraw(player: Arcane23PlayerState, rng: RngFn): void {
-  if (!player.drawnClassic) {
-    player.drawnClassic = drawFromClassicDeck(player, rng)
+function ensureBaseClassicDraw(state: Arcane23State, playerId: string, rng: RngFn): void {
+  const rec = state.playersRecord[playerId]
+  if (!rec.drawnClassic) {
+    rec.drawnClassic = drawFromClassicDeck(state, playerId, rng)
   }
 }
 
-function getEffectiveTarot(player: Arcane23PlayerState): number | null {
-  return player.effectiveTarot
+function playerHasEffectiveTarot(state: Arcane23State, arcanumNumber: number): string[] {
+  return state.playerIds.filter((pid) => state.playersRecord[pid].effectiveTarot === arcanumNumber)
 }
 
-function playerHasTarot(state: Arcane23State, arcanumNumber: number): string[] {
-  return state.playerIds.filter((pid) => getEffectiveTarot(state.playersRecord[pid]) === arcanumNumber)
+function orderTarotDrawers(state: Arcane23State, tarotIds: string[], rng: RngFn): string[] {
+  if (tarotIds.length <= 1) return tarotIds
+  const [a, b] = rng() < 0.5 ? [tarotIds[0], tarotIds[1]] : [tarotIds[1], tarotIds[0]]
+  const ta = state.playersRecord[a].drawnTarot ?? 0
+  const tb = state.playersRecord[b].drawnTarot ?? 0
+  const prioA = getArcanaRuleSpec(ta).priorityRank
+  const prioB = getArcanaRuleSpec(tb).priorityRank
+
+  if (prioA <= 3 && prioB <= 3 && prioA !== prioB) return prioA < prioB ? [a, b] : [b, a]
+  if (prioA <= 3 && prioB > 3) return [a, b]
+  if (prioB <= 3 && prioA > 3) return [b, a]
+
+  if (prioA === 8 && (tb === 0 || tb === 14)) return [a, b]
+  if (prioB === 8 && (ta === 0 || ta === 14)) return [b, a]
+  return [a, b]
 }
 
-/**
- * Computes any remaining interactive prompts or resolves the round once all prompts are answered.
- */
-function advanceResolution(state: Arcane23State, rng: RngFn = Math.random): Arcane23State {
+function enterTarotSpotlight(
+  state: Arcane23State,
+  stepIndex: number,
+  rng: RngFn,
+): Arcane23State {
   const s = cloneState(state)
-  const [p0, p1] = s.playerIds
-  const rec0 = s.playersRecord[p0]
-  const rec1 = s.playersRecord[p1]
+  const actorId = s.tarotDrawOrder[stepIndex]
+  s.presentationStep = stepIndex === 0 ? 'TAROT_1' : 'TAROT_2'
 
-  // Variable Priority XX. Le Jugement must pick an Arcana from tarotDiscard before priority resolution
-  const judgmentPlayers = s.playerIds.filter((pid) => s.playersRecord[pid].effectiveTarot === 20)
-  for (const jPid of judgmentPlayers) {
-    const rec = s.playersRecord[jPid]
-    if (s.tarotDiscard.length > 0) {
+  if (!actorId) {
+    return resolveTurnStrictPriorities(s, rng)
+  }
+
+  const rec = s.playersRecord[actorId]
+  rec.tarotRevealed = true
+
+  // XX. Le Jugement (20): preview & confirm from discard without advancing turn prematurely
+  if (rec.effectiveTarot === 20 && !rec.tarotStepResolved) {
+    const eligibleDiscard = s.tarotDiscard.filter((n) => n !== 20 && n !== 666)
+    if (eligibleDiscard.length > 0) {
       s.phase = 'INTERACTION'
-      s.currentTurnUserId = jPid
+      s.currentTurnUserId = actorId
       s.pendingPrompts = [
         {
-          id: `judgment-${s.roundNumber}-${jPid}`,
+          id: `judgment-${s.roundNumber}-${actorId}`,
           type: 'JUDGMENT_COPY_DISCARD',
-          playerId: jPid,
-          availableArcana: [...s.tarotDiscard],
+          playerId: actorId,
+          availableArcana: eligibleDiscard,
         },
       ]
       return s
-    } else {
-      // No discarded Arcana to copy: Le Jugement grants a decisive +4 bonus to classic draw
-      rec.effectiveTarot = null
-      rec.judgmentBonusPower = 4
-      s.historyLog.unshift('XX. Le Jugement (défausse vide) confère +4 de puissance au tirage classique.')
     }
+    // Empty discard -> no effect (final classic draw happens at duel resolution step)
+    rec.effectiveTarot = null
+    rec.tarotStepResolved = true
+    s.phase = 'INTERACTION'
+    s.pendingPrompts = []
+    s.historyLog.unshift('XX. Le Jugement (défausse vide) est sans effet : 1 carte classique sera piochée.')
+    return s
   }
 
-  // Priority 0: 666. Gaster (1/666 anomaly)
-  const gasterOwners = playerHasTarot(s, 666)
-  if (gasterOwners.length > 0 && !s.roundOutcome) {
+  return prepareSingleTarotStepPrompts(s, actorId, rng)
+}
+
+function prepareSingleTarotStepPrompts(
+  state: Arcane23State,
+  actorId: string,
+  rng: RngFn,
+): Arcane23State {
+  const s = cloneState(state)
+  const rec = s.playersRecord[actorId]
+  const arcNum = rec.effectiveTarot
+
+  if (arcNum === null || rec.tarotStepResolved) {
     s.phase = 'INTERACTION'
-    s.currentTurnUserId = gasterOwners[0]
+    s.pendingPrompts = []
+    return s
+  }
+
+  // Priority 0: 666. Gaster
+  if (arcNum === 666) {
+    s.phase = 'INTERACTION'
+    s.currentTurnUserId = actorId
     s.pendingPrompts = [
       {
-        id: `gaster-${s.roundNumber}-${gasterOwners[0]}`,
+        id: `gaster-${s.roundNumber}-${actorId}`,
         type: 'GASTER_CHOOSE_WINNER',
-        playerId: gasterOwners[0],
+        playerId: actorId,
         candidates: [...s.playerIds],
       },
     ]
     return s
   }
 
-  // Priority 1: XVI. La Maison Dieu (Purges all board effects & cancels opposing Tarot)
-  const towerOwners = playerHasTarot(s, 16)
-  if (towerOwners.length > 0) {
-    s.activePersistentArcana.moon = false
-    s.activePersistentArcana.sun = false
-    s.activePersistentArcana.suddenDeath = false
-    s.targetRoundsToWin = 5
-    for (const pid of s.playerIds) {
-      s.activePersistentArcana.emperor[pid] = null
-      s.activePersistentArcana.star[pid] = null
-      const pRec = s.playersRecord[pid]
-      if (pRec.effectiveTarot !== null && pRec.effectiveTarot !== 16) {
-        s.tarotDiscard.push(pRec.effectiveTarot)
-        pRec.effectiveTarot = null
-      }
-      ensureBaseClassicDraw(pRec, rng)
+  // Priority 1: XIII. Death (instant match loss for drawer)
+  if (arcNum === 13) {
+    const oppId = getOpponentId(s, actorId)
+    rec.tarotStepResolved = true
+    s.winnerId = oppId
+    s.status = 'finished'
+    s.phase = 'FINISHED'
+    s.presentationStep = 'RESOLVED'
+    s.currentTurnUserId = null
+    s.roundOutcome = {
+      roundNumber: s.roundNumber,
+      winnerId: oppId,
+      reason: 'XIII. L’Arcane sans nom (Death) : défaite immédiate du tireur !',
+      pointsAwarded: { [s.playerIds[0]]: 0, [s.playerIds[1]]: 0 },
+      cancelled: false,
+      usedGaster: false,
     }
-    s.historyLog.unshift('XVI. La Maison Dieu purge les effets persistants et impose un duel classique pur.')
-    return finalizeClassicComparison(s, rng, { skipSpecialTarotModifiers: true })
+    s.historyLog.unshift('XIII. L’Arcane sans nom : le tireur perd instantanément la partie.')
+    return s
   }
 
-  // Priority 2: 0. Le Mat + XIV. Tempérance -> Sudden Death combo OR individual effects
-  const matOwners = playerHasTarot(s, 0)
-  const tempOwners = playerHasTarot(s, 14)
-
-  if (matOwners.length > 0 && tempOwners.length > 0) {
-    for (const pid of s.playerIds) {
-      s.playersRecord[pid].score = 0
-    }
+  // Priority 2: XV. Le Diable (cancel round, activate Sudden Death, reset BOTH Tarot cooldowns)
+  if (arcNum === 15) {
+    rec.tarotStepResolved = true
     s.activePersistentArcana.suddenDeath = true
-    s.targetRoundsToWin = 1
-    s.historyLog.unshift('0. Le Mat + XIV. Tempérance : MORT SUBITE ! Scores remis à 0 — le prochain vainqueur gagne la partie.')
-    return completeRoundOutcome(s, {
-      winnerId: null,
-      reason: 'Mort Subite activée (0. Le Mat + XIV. Tempérance) : scores réinitialisés à 0.',
-      cancelled: true,
-      pointsAwarded: { [p0]: 0, [p1]: 0 },
-    })
-  }
-
-  if (matOwners.length > 0) {
-    for (const mPid of matOwners) {
-      s.playersRecord[mPid].noCooldownNextTurn = true
-    }
-    s.historyLog.unshift('0. Le Mat annule la manche et libère son porteur du délai Tarot.')
-    return completeRoundOutcome(s, {
-      winnerId: null,
-      reason: '0. Le Mat annule la manche sans attribuer de point.',
-      cancelled: true,
-      pointsAwarded: { [p0]: 0, [p1]: 0 },
-    })
-  }
-
-  if (tempOwners.length > 0) {
-    for (const tPid of tempOwners) {
-      const oppId = getOpponentId(s, tPid)
-      s.playersRecord[tPid].score = s.playersRecord[oppId].score
-    }
-    s.historyLog.unshift('XIV. Tempérance égalise les scores de manches.')
-    return completeRoundOutcome(s, {
-      winnerId: null,
-      reason: 'XIV. Tempérance égalise le score de manches sur celui de l’adversaire.',
-      cancelled: true,
-      pointsAwarded: { [p0]: 0, [p1]: 0 },
-    })
-  }
-
-  // Priority 3: XIII. La Mort & XII. Le Pendu
-  const deathOwners = playerHasTarot(s, 13)
-  if (deathOwners.length > 0) {
     for (const pid of s.playerIds) {
-      const pRec = s.playersRecord[pid]
-      const pool: Card[] = [...pRec.classicDeck, ...pRec.classicDiscard]
-      if (pRec.drawnClassic) pool.push(pRec.drawnClassic)
-      if (pRec.drawnClassicExtra) pool.push(pRec.drawnClassicExtra)
-      pRec.classicDeck = shuffleArray(pool, rng)
-      pRec.classicDiscard = []
-      pRec.drawnClassic = drawFromClassicDeck(pRec, rng)
-      pRec.drawnClassicExtra = null
-      pRec.effectiveTarot = null
+      s.playersRecord[pid].tarotCooldown = false
+      s.playersRecord[pid].noCooldownNextTurn = true
     }
-    const tarotPool = [...s.tarotDeck, ...s.tarotDiscard]
-    s.tarotDeck = shuffleArray(tarotPool, rng)
-    s.tarotDiscard = []
-    s.historyLog.unshift('XIII. La Mort remélange tous les paquets (52 cartes & Tarot) et relance un duel classique.')
-    return finalizeClassicComparison(s, rng, { skipSpecialTarotModifiers: true })
+    s.phase = 'INTERACTION'
+    s.pendingPrompts = []
+    s.historyLog.unshift(
+      'XV. Le Diable annule la manche, active la Mort Subite et réinitialise le cooldown Tarot des deux joueurs.',
+    )
+    return s
   }
 
-  const penduOwners = playerHasTarot(s, 12)
-  if (penduOwners.length === 1) {
-    const tmpClassic = rec0.drawnClassic
-    const tmpExtra = rec0.drawnClassicExtra
-    rec0.drawnClassic = rec1.drawnClassic
-    rec0.drawnClassicExtra = rec1.drawnClassicExtra
-    rec1.drawnClassic = tmpClassic
-    rec1.drawnClassicExtra = tmpExtra
-    const penduOwner = penduOwners[0]
-    s.playersRecord[penduOwner].effectiveTarot = null
-    s.historyLog.unshift('XII. Le Pendu échange les cartes piochées entre les deux joueurs.')
-  } else if (penduOwners.length === 2) {
-    rec0.effectiveTarot = null
-    rec1.effectiveTarot = null
-  }
-
-  // Priority 4: I. Le Bateleur (1), II. La Papesse (2), IX. L'Ermite (9)
-  const bateleurOwners = playerHasTarot(s, 1).filter((pid) => !s.playersRecord[pid].drawnClassic)
-  if (bateleurOwners.length > 0) {
-    const bPid = bateleurOwners[0]
-    const bRec = s.playersRecord[bPid]
-    ensureClassicDeckCount(bRec, 3, rng)
-    const topCards = bRec.classicDeck.slice(0, 3)
+  // Priority 8: I. Le Bateleur (looks at top 3 of own deck)
+  if (arcNum === 1) {
+    ensureClassicDeckCount(rec, 3, rng)
+    const topCards = rec.classicDeck.slice(0, 3)
     if (topCards.length > 0) {
       s.phase = 'INTERACTION'
-      s.currentTurnUserId = bPid
+      s.currentTurnUserId = actorId
       s.pendingPrompts = [
         {
-          id: `bateleur-${s.roundNumber}-${bPid}`,
+          id: `bateleur-${s.roundNumber}-${actorId}`,
           type: 'BATELEUR_PICK_ORDER',
-          playerId: bPid,
+          playerId: actorId,
           topCards,
         },
       ]
@@ -527,21 +813,92 @@ function advanceResolution(state: Arcane23State, rng: RngFn = Math.random): Arca
     }
   }
 
-  const papesseOwners = playerHasTarot(s, 2)
-  if (papesseOwners.length > 0) {
-    const pPid = papesseOwners[0]
-    const oppId = getOpponentId(s, pPid)
+  // Priority 8: IX. L'Ermite — ALWAYS offers play/cancel choice, even if opponent chose Tarot!
+  // Never leaks a Tarot opponent's future classic card.
+  if (arcNum === 9) {
+    const oppId = getOpponentId(s, actorId)
+    const oppRec = s.playersRecord[oppId]
+    const opponentChoseTarot = oppRec?.choice === 'tarot'
+    const oppCard =
+      opponentChoseTarot || s.activePersistentArcana.moon
+        ? null
+        : (oppRec?.drawnClassic ?? null)
+
+    s.phase = 'INTERACTION'
+    s.currentTurnUserId = actorId
+    s.pendingPrompts = [
+      {
+        id: `ermite-${s.roundNumber}-${actorId}`,
+        type: 'ERMITE_DECIDE',
+        playerId: actorId,
+        observedOpponentCard: oppCard,
+        hiddenByMoon: s.activePersistentArcana.moon,
+        opponentChoseTarot,
+      },
+    ]
+    return s
+  }
+
+  // Priority 8: XI. La Force (draws own classic card, then may sacrifice 1 round for Joker)
+  if (arcNum === 11) {
+    ensureBaseClassicDraw(s, actorId, rng)
+    const drawnCard = rec.drawnClassic
+    if (drawnCard && rec.score >= 1) {
+      s.phase = 'INTERACTION'
+      s.currentTurnUserId = actorId
+      s.pendingPrompts = [
+        {
+          id: `force-${s.roundNumber}-${actorId}`,
+          type: 'FORCE_SACRIFICE',
+          playerId: actorId,
+          currentScore: rec.score,
+          drawnCard,
+        },
+      ]
+      return s
+    }
+    rec.tarotStepResolved = true
+    s.phase = 'INTERACTION'
+    s.pendingPrompts = []
+    return s
+  }
+
+  // Priority 5: X. La Roue de la Fortune
+  if (arcNum === 10) {
+    const hasHighOverride = s.playerIds.some((pid) => {
+      const t = s.playersRecord[pid].effectiveTarot
+      return t === 666 || t === 13 || t === 15 || t === 21
+    })
+    if (!hasHighOverride) {
+      const oppId = getOpponentId(s, actorId)
+      s.phase = 'INTERACTION'
+      s.currentTurnUserId = oppId
+      s.pendingPrompts = [
+        {
+          id: `wheel-${s.roundNumber}-${actorId}`,
+          type: 'WHEEL_CALL_COIN',
+          playerId: oppId,
+          ownerId: actorId,
+        },
+      ]
+      return s
+    }
+  }
+
+  // Priority 10: II. La Papesse (reorder opponent's top 3)
+  if (arcNum === 2) {
+    const oppId = getOpponentId(s, actorId)
     const oppRec = s.playersRecord[oppId]
     ensureClassicDeckCount(oppRec, 3, rng)
     const topCards = oppRec.classicDeck.slice(0, 3)
     if (topCards.length > 0) {
       s.phase = 'INTERACTION'
-      s.currentTurnUserId = pPid
+      s.currentTurnUserId = actorId
       s.pendingPrompts = [
         {
-          id: `papesse-${s.roundNumber}-${pPid}`,
+          id: `papesse-${s.roundNumber}-${actorId}`,
           type: 'PAPESSE_REORDER_OPPONENT',
-          playerId: pPid,
+          playerId: actorId,
           opponentId: oppId,
           topCards,
         },
@@ -550,332 +907,339 @@ function advanceResolution(state: Arcane23State, rng: RngFn = Math.random): Arca
     }
   }
 
-  const ermiteOwners = playerHasTarot(s, 9)
-  if (ermiteOwners.length > 0) {
-    const ePid = ermiteOwners[0]
-    const eRec = s.playersRecord[ePid]
-    ensureBaseClassicDraw(eRec, rng)
-    if (eRec.drawnClassic) {
-      s.phase = 'INTERACTION'
-      s.currentTurnUserId = ePid
-      s.pendingPrompts = [
-        {
-          id: `ermite-${s.roundNumber}-${ePid}`,
-          type: 'ERMITE_DECIDE',
-          playerId: ePid,
-          peekedCard: eRec.drawnClassic,
-        },
-      ]
-      return s
-    }
-  }
-
-  // Priority 5: III. L'Impératrice (3) & VII. Le Chariot (7)
-  for (const pid of playerHasTarot(s, 3)) {
-    const rec = s.playersRecord[pid]
-    if (!rec.drawnClassic) {
-      const c1 = drawFromClassicDeck(rec, rng)
-      const c2 = drawFromClassicDeck(rec, rng)
-      if (c1 && c2) {
-        const sunMode = s.activePersistentArcana.sun || playerHasTarot(s, 19).length > 0
-        const v1 = getClassicCardNumericValue(c1)
-        const v2 = getClassicCardNumericValue(c2)
-        const keepFirst = sunMode ? v1 <= v2 : v1 >= v2
-        rec.drawnClassic = keepFirst ? c1 : c2
-        rec.classicDiscard.push(keepFirst ? c2 : c1)
-        s.historyLog.unshift('III. L’Impératrice pioche 2 cartes et conserve la plus avantageuse.')
-      } else {
-        rec.drawnClassic = c1 ?? c2
-      }
-    }
-  }
-
-  for (const pid of playerHasTarot(s, 7)) {
-    const rec = s.playersRecord[pid]
-    if (!rec.drawnClassic) {
-      rec.drawnClassic = drawFromClassicDeck(rec, rng)
-      rec.drawnClassicExtra = drawFromClassicDeck(rec, rng)
-      s.historyLog.unshift('VII. Le Chariot additionne 2 cartes classiques.')
-    }
-  }
-
-  // Priority 6: XI. La Force (11) prompt (only if player hasn't resolved Force yet and has score >= 1)
-  const forceOwners = playerHasTarot(s, 11).filter(
-    (pid) => !s.playersRecord[pid].forceJokerSecured && !s.playersRecord[pid].drawnClassic,
-  )
-  if (forceOwners.length > 0) {
-    const fPid = forceOwners[0]
-    const fRec = s.playersRecord[fPid]
-    if (fRec.score >= 1) {
-      s.phase = 'INTERACTION'
-      s.currentTurnUserId = fPid
-      s.pendingPrompts = [
-        {
-          id: `force-${s.roundNumber}-${fPid}`,
-          type: 'FORCE_SACRIFICE',
-          playerId: fPid,
-          currentScore: fRec.score,
-        },
-      ]
-      return s
-    } else {
-      ensureBaseClassicDraw(fRec, rng)
-    }
-  }
-
-  // Priority 7: V. Le Pape (5) & X. La Roue de la Fortune (10) — Overrides La Force!
-  const papeOwners = playerHasTarot(s, 5)
-  if (papeOwners.length > 0) {
-    s.historyLog.unshift('V. Le Pape impose une trêve absolue : égalité pacifique (aucun point).')
-    return completeRoundOutcome(s, {
-      winnerId: null,
-      reason: 'V. Le Pape impose une égalité pacifique absolue.',
-      cancelled: true,
-      pointsAwarded: { [p0]: 0, [p1]: 0 },
-    })
-  }
-
-  const wheelOwners = playerHasTarot(s, 10)
-  if (wheelOwners.length > 0) {
-    const ownerId = wheelOwners[0]
-    const oppId = getOpponentId(s, ownerId)
+  // Priority 10: XVII. L'Étoile (pick number 2..10 for next 2 turns)
+  if (arcNum === 17) {
     s.phase = 'INTERACTION'
-    s.currentTurnUserId = oppId
+    s.currentTurnUserId = actorId
     s.pendingPrompts = [
       {
-        id: `wheel-${s.roundNumber}-${oppId}`,
-        type: 'WHEEL_CALL_COIN',
-        playerId: oppId,
-        ownerId,
+        id: `star-${s.roundNumber}-${actorId}`,
+        type: 'STAR_PICK_NUMBER',
+        playerId: actorId,
       },
     ]
     return s
   }
 
-  // Ensure every player has a classic card before XV. Le Diable check and Priority 8-9 comparison
-  for (const pid of s.playerIds) {
-    const rec = s.playersRecord[pid]
-    if (!rec.forceJokerSecured) {
-      ensureBaseClassicDraw(rec, rng)
+  // Priority 10: IV. L'Empereur does NOT prompt immediately on draw!
+  // It activates a 2-turn decree whose interactive choice triggers at the start of each of the next 2 turns.
+  if (arcNum === 4) {
+    const oppId = getOpponentId(s, actorId)
+    s.activePersistentArcana.emperor[oppId] = {
+      ownerId: actorId,
+      targetId: oppId,
+      remainingTurns: 2,
+      currentTurnMode: null,
+      activatedRound: s.roundNumber,
     }
+    rec.tarotStepResolved = true
+    s.phase = 'INTERACTION'
+    s.pendingPrompts = []
+    s.historyLog.unshift(
+      'IV. L’Empereur s’installe : au début des 2 prochains tours, son détenteur pourra interdire ou forcer le Tarot adverse.',
+    )
+    return s
   }
 
-  // Priority 6b: XV. Le Diable (15) — draw 2nd card if first doesn't beat opponent; bust if sum > 21
-  for (const dPid of playerHasTarot(s, 15)) {
-    const rec = s.playersRecord[dPid]
-    const oppRec = s.playersRecord[getOpponentId(s, dPid)]
-    if (!rec.drawnClassicExtra && rec.drawnClassic) {
-      const myVal = getPlayerEffectiveClassicScore(rec)
-      const oppVal = getPlayerEffectiveClassicScore(oppRec)
-      if (myVal <= oppVal) {
-        rec.drawnClassicExtra = drawFromClassicDeck(rec, rng)
-        const total = getPlayerEffectiveClassicScore(rec)
-        if (total > 21) {
-          rec.bustedDiable = true
-          rec.score = Math.max(0, rec.score - 2)
-          s.historyLog.unshift(`XV. Le Diable dépasse 21 (${total}) ! Banqueroute : -2 manches.`)
-        } else {
-          s.historyLog.unshift(`XV. Le Diable pioche une 2e carte sans dépasser 21 (${total}).`)
-        }
-      }
-    }
-  }
-
-  // Check Priority 10 persistent prompts before final completion: XVII. L'Étoile (17) & IV. L'Empereur (4)
-  return finalizeClassicComparison(s, rng, { skipSpecialTarotModifiers: false })
+  // Defer final classic card draws for all other Tarot cards until duel resolution
+  // so no future card is ever disclosed during TAROT_1 / TAROT_2.
+  rec.tarotStepResolved = true
+  s.phase = 'INTERACTION'
+  s.pendingPrompts = []
+  return s
 }
 
-function finalizeClassicComparison(
-  state: Arcane23State,
-  _rng: RngFn,
-  opts: { skipSpecialTarotModifiers: boolean },
-): Arcane23State {
+function resolveTurnStrictPriorities(state: Arcane23State, rng: RngFn): Arcane23State {
   const s = cloneState(state)
   const [p0, p1] = s.playerIds
   const rec0 = s.playersRecord[p0]
   const rec1 = s.playersRecord[p1]
 
-  // Check if XIX. Le Soleil (19) was played this round (activates Sun & clears Moon)
-  if (!opts.skipSpecialTarotModifiers && playerHasTarot(s, 19).length > 0) {
-    s.activePersistentArcana.sun = true
-    s.activePersistentArcana.moon = false
-    s.historyLog.unshift('XIX. Le Soleil illumine le plateau : désormais, la plus petite carte gagne.')
+  rec0.tarotRevealed = rec0.drawnTarot !== null
+  rec1.tarotRevealed = rec1.drawnTarot !== null
+
+  // Priority 2: XV. Le Diable (round cancelled, Sudden Death enabled, cooldown reset for both)
+  const diableOwners = playerHasEffectiveTarot(s, 15)
+  if (diableOwners.length > 0) {
+    s.activePersistentArcana.suddenDeath = true
+    for (const pid of s.playerIds) {
+      s.playersRecord[pid].tarotCooldown = false
+      s.playersRecord[pid].noCooldownNextTurn = true
+    }
+    return finalizeRoundOutcome(s, {
+      winnerId: null,
+      reason: 'XV. Le Diable annule la manche, active la Mort Subite et réinitialise le cooldown Tarot des deux joueurs.',
+      pointsAwarded: { [p0]: 0, [p1]: 0 },
+      cancelled: true,
+    })
   }
 
+  // Priority 6 modifier (III. L'Impératrice -> +2 rounds instead of +1)
+  const empressActive = playerHasEffectiveTarot(s, 3).length > 0
+  const baseWinPoints = empressActive ? 2 : 1
+
+  // Priority 3: XXI. Le Monde (immediate round win + discard reshuffles)
+  const worldOwners = playerHasEffectiveTarot(s, 21)
+  if (worldOwners.length === 1) {
+    const wPid = worldOwners[0]
+    const wRec = s.playersRecord[wPid]
+    if (wRec.classicDiscard.length > 0) {
+      wRec.classicDeck = shuffleArray([...wRec.classicDeck, ...wRec.classicDiscard], rng)
+      wRec.classicDiscard = []
+    }
+    if (s.tarotDiscard.length > 0) {
+      s.tarotDeck = shuffleArray([...s.tarotDeck, ...s.tarotDiscard], rng)
+      s.tarotDiscard = []
+    }
+    return finalizeRoundOutcome(s, {
+      winnerId: wPid,
+      reason: `XXI. Le Monde accorde la victoire immédiate de la manche (+${baseWinPoints}) et remélange les défausses !`,
+      pointsAwarded: {
+        [p0]: wPid === p0 ? baseWinPoints : 0,
+        [p1]: wPid === p1 ? baseWinPoints : 0,
+      },
+      cancelled: false,
+    })
+  }
+
+  // Priority 8 Hermit cancel check
+  const hermitCanceller = s.playerIds.find((pid) => s.playersRecord[pid].ermiteCancelled)
+  if (hermitCanceller) {
+    return finalizeRoundOutcome(s, {
+      winnerId: null,
+      reason: 'IX. L’Ermite annule la manche (0 point attribué).',
+      pointsAwarded: { [p0]: 0, [p1]: 0 },
+      cancelled: true,
+    })
+  }
+
+  // Priority 7: VIII. La Justice & XVI. La Maison Dieu apply directly to scores before duel resolution
+  if (playerHasEffectiveTarot(s, 8).length > 0) {
+    const minScore = Math.min(rec0.score, rec1.score)
+    rec0.score = minScore
+    rec1.score = minScore
+    s.historyLog.unshift(`VIII. La Justice ramène les deux joueurs à égalité (${minScore} manche(s)).`)
+  }
+  if (playerHasEffectiveTarot(s, 16).length > 0) {
+    rec0.score = Math.max(0, rec0.score - 2)
+    rec1.score = Math.max(0, rec1.score - 2)
+    s.historyLog.unshift('XVI. La Maison Dieu retire 2 manches gagnées aux deux joueurs.')
+  }
+
+  // Priority 5: V. Le Pape & X. La Roue de la Fortune override classic duel
+  if (playerHasEffectiveTarot(s, 5).length > 0) {
+    return finalizeRoundOutcome(s, {
+      winnerId: null,
+      reason: 'V. Le Pape bénit la table : pas de duel, les deux joueurs gagnent +1 manche chacun.',
+      pointsAwarded: { [p0]: 1, [p1]: 1 },
+      cancelled: false,
+    })
+  }
+
+  if (s.pendingWheelFlip) {
+    const wf = s.pendingWheelFlip
+    s.pendingWheelFlip = null
+    return finalizeRoundOutcome(s, {
+      winnerId: wf.winnerId,
+      reason: `X. La Roue de la Fortune (${wf.result === 'heads' ? 'Face' : 'Pile'}) : +2 manches !`,
+      pointsAwarded: {
+        [p0]: wf.winnerId === p0 ? 2 : 0,
+        [p1]: wf.winnerId === p1 ? 2 : 0,
+      },
+      cancelled: false,
+      wheelFlip: wf,
+    })
+  }
+
+  // Now draw final classic cards for Tarot players (VI. Amoureux, VII. Chariot, and standard Tarot classic draws)
+  for (const pid of s.playerIds) {
+    const pRec = s.playersRecord[pid]
+    if (pRec.effectiveTarot === 6 && !pRec.drawnClassic) {
+      const c1 = drawFromClassicDeck(s, pid, rng)
+      const c2 = drawFromClassicDeck(s, pid, rng)
+      if (c1 && c2) {
+        const v1 = getClassicCardNumericValue(c1)
+        const v2 = getClassicCardNumericValue(c2)
+        if (v1 <= 10 && v2 <= 10) {
+          pRec.drawnClassic = c1
+          pRec.drawnClassicExtra = c2
+          pRec.loversCappedSum = Math.min(10, v1 + v2)
+        } else {
+          const keepFirst = v1 >= v2
+          pRec.drawnClassic = keepFirst ? c1 : c2
+          pRec.classicDiscard.push(keepFirst ? c2 : c1)
+          pRec.loversCappedSum = null
+        }
+      } else {
+        pRec.drawnClassic = c1 ?? c2
+      }
+    } else if (pRec.effectiveTarot === 7) {
+      ensureBaseClassicDraw(s, pid, rng)
+      pRec.chariotBonus = pRec.score
+    } else {
+      ensureBaseClassicDraw(s, pid, rng)
+    }
+  }
+
+  // Priority 10 persistent board activations:
+  // XVIII. La Lune (permanent for rest of match)
+  for (const mPid of playerHasEffectiveTarot(s, 18)) {
+    s.activePersistentArcana.moon = true
+    s.activePersistentArcana.moonOwnerId = mPid
+    s.historyLog.unshift('XVIII. La Lune voile désormais toutes les cartes classiques jusqu’à la résolution.')
+  }
+  // XIX. Le Soleil — reveals ONLY the next 3 cards currently on top of each classic deck (3 -> 2 -> 1 -> 0)
+  for (const sunPid of playerHasEffectiveTarot(s, 19)) {
+    const remaining: Record<string, number> = {}
+    for (const pid of s.playerIds) {
+      ensureClassicDeckCount(s.playersRecord[pid], 3, rng)
+      remaining[pid] = Math.min(3, s.playersRecord[pid].classicDeck.length)
+    }
+    s.activePersistentArcana.sun = {
+      ownerId: sunPid,
+      revealedCardsRemaining: remaining,
+    }
+    s.historyLog.unshift('XIX. Le Soleil révèle les 3 prochaines cartes sur le dessus de chaque deck.')
+  }
+
+  // Priority 9: XII. Le Pendu mandatorily swaps revealed classic cards
+  if (playerHasEffectiveTarot(s, 12).length === 1) {
+    const tmpClassic = rec0.drawnClassic
+    const tmpExtra = rec0.drawnClassicExtra
+    const tmpLovers = rec0.loversCappedSum
+    const tmpChariot = rec0.chariotBonus
+    const tmpForce = rec0.forceJokerSecured
+
+    rec0.drawnClassic = rec1.drawnClassic
+    rec0.drawnClassicExtra = rec1.drawnClassicExtra
+    rec0.loversCappedSum = rec1.loversCappedSum
+    rec0.chariotBonus = rec1.chariotBonus
+    rec0.forceJokerSecured = rec1.forceJokerSecured
+
+    rec1.drawnClassic = tmpClassic
+    rec1.drawnClassicExtra = tmpExtra
+    rec1.loversCappedSum = tmpLovers
+    rec1.chariotBonus = tmpChariot
+    rec1.forceJokerSecured = tmpForce
+    s.historyLog.unshift('XII. Le Pendu échange obligatoirement les deux cartes classiques.')
+  }
+
+  // XVII. L'Étoile number watch check (triggers +2 rounds if matched in next 2 turns)
+  let starBonusWinner: { ownerId: string; matchedNumber: number } | undefined
+  for (const ownerId of s.playerIds) {
+    const st = s.activePersistentArcana.star[ownerId]
+    if (st && s.roundNumber > st.activatedRound && st.remainingTurns > 0) {
+      const candidates = [
+        rec0.drawnClassic,
+        rec0.drawnClassicExtra,
+        rec1.drawnClassic,
+        rec1.drawnClassicExtra,
+      ].filter((c): c is Card => Boolean(c))
+      const hit = candidates.find((c) => {
+        const val = getClassicCardNumericValue(c)
+        return val >= 2 && val <= 10 && val === st.targetNumber
+      })
+      if (hit) {
+        s.playersRecord[ownerId].score += 2
+        s.activePersistentArcana.star[ownerId] = null
+        starBonusWinner = { ownerId, matchedNumber: st.targetNumber }
+        s.historyLog.unshift(
+          `XVII. L’Étoile se réalise (#${st.targetNumber}) : +2 manches immédiates pour son porteur !`,
+        )
+      }
+    }
+  }
+
+  // Priority 5: XIV. Tempérance (average of two classic cards; inverted with 0. Le Mat)
+  const tempOwners = playerHasEffectiveTarot(s, 14)
+  const hasMat = playerHasEffectiveTarot(s, 0).length > 0
+
+  if (tempOwners.length === 1) {
+    const tOwner = tempOwners[0]
+    const tOpp = getOpponentId(s, tOwner)
+    const v0 = getPlayerEffectiveClassicScore(rec0)
+    const v1 = getPlayerEffectiveClassicScore(rec1)
+    const isIntegerAverage = (v0 + v1) % 2 === 0
+    const ownerWins = hasMat ? !isIntegerAverage : isIntegerAverage
+    const winnerId = ownerWins ? tOwner : tOpp
+    return finalizeRoundOutcome(s, {
+      winnerId,
+      reason: hasMat
+        ? `XIV. Tempérance + 0. Le Mat : moyenne (${(v0 + v1) / 2}) ${isIntegerAverage ? 'entière → adversaire' : 'non entière → tireur'} (+${baseWinPoints}).`
+        : `XIV. Tempérance : moyenne (${(v0 + v1) / 2}) ${isIntegerAverage ? 'entière → tireur' : 'non entière → adversaire'} (+${baseWinPoints}).`,
+      pointsAwarded: {
+        [p0]: winnerId === p0 ? baseWinPoints : 0,
+        [p1]: winnerId === p1 ? baseWinPoints : 0,
+      },
+      cancelled: false,
+      starTriggered: starBonusWinner,
+    })
+  }
+
+  // Standard Duel Comparison (with XI. La Force Joker & 0. Le Mat inversion)
   let winnerId: string | null = null
   let reason = ''
-  let pts = 1
-
-  // Joker from XI. La Force wins automatically unless opponent also has Force Joker
-  if (!opts.skipSpecialTarotModifiers && (rec0.forceJokerSecured || rec1.forceJokerSecured)) {
+  if (rec0.forceJokerSecured || rec1.forceJokerSecured) {
     if (rec0.forceJokerSecured && rec1.forceJokerSecured) {
       winnerId = null
-      reason = 'Double Joker (XI. La Force) : les forces s’annulent.'
-      pts = 0
+      reason = 'Double Joker (XI. La Force) : égalité.'
     } else {
       winnerId = rec0.forceJokerSecured ? p0 : p1
-      // Sacrifice 1 round -> net +1 round by awarding 2 on victory
-      pts = 2
-      reason = 'XI. La Force sacrifie 1 manche pour forger un Joker imbattable (+2 manches).'
+      reason = `XI. La Force remporte le duel grâce au Joker imbattable (+${baseWinPoints}).`
     }
-  } else if (rec0.bustedDiable !== rec1.bustedDiable) {
-    winnerId = rec0.bustedDiable ? p1 : p0
-    reason = 'XV. Le Diable a dépassé 21 (Bust) : défaite automatique.'
   } else {
-    // Check VI. L'Amoureux (same suit color -> +2 rounds for drawer)
-    const lovers = opts.skipSpecialTarotModifiers ? [] : playerHasTarot(s, 6)
-    const c0 = rec0.drawnClassic
-    const c1 = rec1.drawnClassic
-    if (lovers.length === 1 && c0 && c1 && isRedSuit(c0.suit) === isRedSuit(c1.suit)) {
-      winnerId = lovers[0]
-      pts = 2
-      reason = 'VI. L’Amoureux unit deux cartes de même couleur : victoire (+2 manches) !'
+    const s0 = getPlayerEffectiveClassicScore(rec0)
+    const s1 = getPlayerEffectiveClassicScore(rec1)
+    if (s0 === s1) {
+      winnerId = null
+      reason = `Égalité sur le duel (${s0} vs ${s1}) : manche nulle (0 point).`
     } else {
-      const v0 = getPlayerEffectiveClassicScore(rec0)
-      const v1 = getPlayerEffectiveClassicScore(rec1)
-
-      if (v0 === v1) {
-        winnerId = null
-        pts = 0
-        reason = `Égalité parfaite (${v0} vs ${v1}) : aucun point attribué.`
-      } else {
-        let highWins = !s.activePersistentArcana.sun
-        if (
-          !opts.skipSpecialTarotModifiers &&
-          playerHasTarot(s, 8).length > 0 &&
-          Math.abs(v0 - v1) >= 5
-        ) {
-          highWins = !highWins
-          reason = `VIII. La Justice renverse l’écart de ${Math.abs(v0 - v1)} points !`
-        }
-
-        winnerId = highWins ? (v0 > v1 ? p0 : p1) : v0 < v1 ? p0 : p1
-        if (!reason) {
-          reason = s.activePersistentArcana.sun
-            ? `Soleil actif (plus petite carte gagne) : ${v0} vs ${v1}.`
-            : `Comparaison classique : ${v0} vs ${v1}.`
-        }
-      }
+      winnerId = hasMat ? (s0 < s1 ? p0 : p1) : s0 > s1 ? p0 : p1
+      reason = hasMat
+        ? `0. Le Mat inverse la hiérarchie (${s0} vs ${s1}) : la plus faible l’emporte (+${baseWinPoints}).`
+        : `Duel classique (${s0} vs ${s1}) (+${baseWinPoints}).`
     }
   }
 
-  // XXI. Le Monde (21): winning awards 2 rounds instead of 1
-  if (!opts.skipSpecialTarotModifiers && winnerId && getEffectiveTarot(s.playersRecord[winnerId]) === 21) {
-    pts = Math.max(pts, 2)
-    reason += ' XXI. Le Monde double la victoire (+2 manches) !'
-  }
-
-  // XVII. L'Étoile existing corner effect check: winning with chosen number awards +2 rounds
-  if (winnerId) {
-    const activeStar = s.activePersistentArcana.star[winnerId]
-    const winCard = s.playersRecord[winnerId].drawnClassic
-    if (
-      activeStar &&
-      activeStar.remainingTurns > 0 &&
-      winCard &&
-      getClassicCardNumericValue(winCard) === activeStar.targetNumber
-    ) {
-      pts = Math.max(pts, 2)
-      reason += ` XVII. L’Étoile aligne le #${activeStar.targetNumber} (+2 manches) !`
-    }
-  }
-
-  // Prompt XVII. L'Étoile (17) or IV. L'Empereur (4) if played this round (post-resolution corner placement)
-  if (!opts.skipSpecialTarotModifiers) {
-    const pendingStar = playerHasTarot(s, 17).find(
-      (pid) => s.playersRecord[pid].effectiveTarot === 17 && !s.activePersistentArcana.star[pid],
-    )
-    if (pendingStar) {
-      // Wait — store temporary outcome & let prompt finish cleanly, or complete round outcome AFTER prompts!
-    }
-  }
-
-  const resolved = completeRoundOutcome(s, {
+  return finalizeRoundOutcome(s, {
     winnerId,
     reason,
-    cancelled: false,
     pointsAwarded: {
-      [p0]: winnerId === p0 ? pts : 0,
-      [p1]: winnerId === p1 ? pts : 0,
+      [p0]: winnerId === p0 ? baseWinPoints : 0,
+      [p1]: winnerId === p1 ? baseWinPoints : 0,
     },
+    cancelled: false,
+    starTriggered: starBonusWinner,
   })
-
-  // Queue post-round persistent placements (L'Étoile / L'Empereur) if newly drawn this turn
-  if (!opts.skipSpecialTarotModifiers) {
-    for (const pid of playerHasTarot(resolved, 17)) {
-      resolved.phase = 'INTERACTION'
-      resolved.currentTurnUserId = pid
-      resolved.pendingPrompts.push({
-        id: `star-${resolved.roundNumber}-${pid}`,
-        type: 'STAR_PICK_NUMBER',
-        playerId: pid,
-      })
-    }
-    for (const pid of playerHasTarot(resolved, 4)) {
-      resolved.phase = 'INTERACTION'
-      resolved.currentTurnUserId = pid
-      resolved.pendingPrompts.push({
-        id: `emperor-${resolved.roundNumber}-${pid}`,
-        type: 'EMPEROR_CHOOSE_LOCK',
-        playerId: pid,
-        opponentId: getOpponentId(resolved, pid),
-      })
-    }
-    if (resolved.pendingPrompts.length > 0) {
-      resolved.currentTurnUserId = resolved.pendingPrompts[0].playerId
-      // Pause match win transition until interactive post-effect settles unless score already >= target
-      if (resolved.winnerId) {
-        resolved.status = 'player_turns'
-      }
-      return resolved
-    }
-  }
-
-  return resolved
 }
 
-function completeRoundOutcome(
+function finalizeRoundOutcome(
   state: Arcane23State,
   opts: {
     winnerId: string | null
     reason: string
-    cancelled: boolean
     pointsAwarded: Record<string, number>
+    cancelled: boolean
     usedGaster?: boolean
+    starTriggered?: { ownerId: string; matchedNumber: number }
     wheelFlip?: Arcane23RoundOutcome['wheelFlip']
   },
 ): Arcane23State {
   const s = cloneState(state)
   const [p0, p1] = s.playerIds
 
-  if (opts.winnerId && opts.pointsAwarded[opts.winnerId]) {
-    s.playersRecord[opts.winnerId].score += opts.pointsAwarded[opts.winnerId]
-  }
-
-  // Decrement active Star remainingTurns for existing stars
   for (const pid of s.playerIds) {
-    const star = s.activePersistentArcana.star[pid]
-    if (star) {
-      const nextTurns = star.remainingTurns - 1
-      s.activePersistentArcana.star[pid] = nextTurns > 0 ? { ...star, remainingTurns: nextTurns } : null
+    const add = opts.pointsAwarded[pid] ?? 0
+    if (add > 0) {
+      s.playersRecord[pid].score += add
     }
   }
 
-  const moonPlayed = playerHasTarot(s, 18).length > 0
-  if (moonPlayed) {
-    s.activePersistentArcana.moon = true
-  }
-
-  const c0 = s.playersRecord[p0].drawnClassic
-  const c1 = s.playersRecord[p1].drawnClassic
-  const cardsSummary = `J1: ${c0 ? `${c0.rank}${c0.suit[0].toUpperCase()}` : 'Arcane'} · J2: ${c1 ? `${c1.rank}${c1.suit[0].toUpperCase()}` : 'Arcane'}`
-
-  if (s.activePersistentArcana.moon) {
-    s.hiddenOutcomeSnapshot = {
-      roundNumber: s.roundNumber,
-      winnerId: opts.winnerId,
-      reason: opts.reason,
-      summary: cardsSummary,
+  for (const pid of s.playerIds) {
+    const st = s.activePersistentArcana.star[pid]
+    if (st && s.roundNumber > st.activatedRound) {
+      const rem = st.remainingTurns - 1
+      s.activePersistentArcana.star[pid] = rem > 0 ? { ...st, remainingTurns: rem } : null
     }
   }
 
@@ -885,32 +1249,40 @@ function completeRoundOutcome(
     reason: opts.reason,
     pointsAwarded: opts.pointsAwarded,
     cancelled: opts.cancelled,
-    hiddenByMoon: s.activePersistentArcana.moon,
     usedGaster: Boolean(opts.usedGaster),
+    starTriggered: opts.starTriggered,
     wheelFlip: opts.wheelFlip,
   }
+  s.presentationStep = 'RESOLVED'
 
-  const matchWinner = s.playerIds.find((pid) => s.playersRecord[pid].score >= s.targetRoundsToWin) ?? null
+  let matchWinner: string | null = null
+  if (opts.usedGaster && opts.winnerId) {
+    matchWinner = opts.winnerId
+  } else if (s.activePersistentArcana.suddenDeath && opts.winnerId && !opts.cancelled) {
+    matchWinner = opts.winnerId
+  } else {
+    const reachedTarget = s.playerIds.filter((pid) => s.playersRecord[pid].score >= s.targetRoundsToWin)
+    if (reachedTarget.length === 1) {
+      matchWinner = reachedTarget[0]
+    } else if (reachedTarget.length === 2) {
+      const a = s.playersRecord[p0].score
+      const b = s.playersRecord[p1].score
+      if (a !== b) matchWinner = a > b ? p0 : p1
+    }
+  }
+
   if (matchWinner) {
     s.winnerId = matchWinner
     s.status = 'finished'
     s.phase = 'FINISHED'
     s.currentTurnUserId = null
-    // Reveal Moon snapshot immediately if match just ended!
-    if (s.hiddenOutcomeSnapshot) {
-      s.lastRevealedMoonOutcome = s.hiddenOutcomeSnapshot
-      s.hiddenOutcomeSnapshot = null
-      s.activePersistentArcana.moon = false
-      if (s.roundOutcome) s.roundOutcome.hiddenByMoon = false
-    }
-    s.historyLog.unshift(`Victoire finale ! Score requis (${s.targetRoundsToWin}) atteint.`)
+    s.historyLog.unshift(`Victoire finale ! ${opts.reason}`)
   } else {
     s.status = 'player_turns'
     s.phase = 'ROUND_END'
     s.currentTurnUserId = s.playerIds[0] ?? null
   }
 
-  // Silence unused rng lint cleanly if completeRoundOutcome doesn't need rng
   return s
 }
 
@@ -920,7 +1292,7 @@ export function submitDrawChoice(
   choice: DrawChoice,
   options?: SubmitChoiceOptions,
 ): Arcane23State {
-  if (state.phase !== 'CHOOSING') return state
+  if (state.phase !== 'CHOOSING' || state.presentationStep !== 'CHOOSING') return state
   const rec = state.playersRecord[playerId]
   if (!rec || rec.choice !== null) return state
 
@@ -932,44 +1304,32 @@ export function submitDrawChoice(
   const rng = options?.rng ?? Math.random
   s.playersRecord[playerId].choice = choice
 
-  // Both players must commit before reveal
-  const bothChosen = s.playerIds.every((pid) => s.playersRecord[pid].choice !== null)
-  if (!bothChosen) {
+  if (!s.playerIds.every((pid) => s.playersRecord[pid].choice !== null)) {
     return s
   }
 
-  // Reveal any previous round veiled by XVIII. La Lune now that both players locked in choices
-  if (s.hiddenOutcomeSnapshot) {
-    s.lastRevealedMoonOutcome = s.hiddenOutcomeSnapshot
-    s.hiddenOutcomeSnapshot = null
-    s.activePersistentArcana.moon = false
-  } else {
-    s.lastRevealedMoonOutcome = null
-  }
-
-  // Decrement active Emperor locks once the forced/forbidden choice has been locked in
+  // Clear this turn's active Emperor constraint (remainingTurns was already decremented when owner chose in EMPEROR_CHOICE)
   for (const pid of s.playerIds) {
     const emp = s.activePersistentArcana.emperor[pid]
     if (emp) {
-      const nextTurns = emp.remainingTurns - 1
-      s.activePersistentArcana.emperor[pid] =
-        nextTurns > 0 ? { ...emp, remainingTurns: nextTurns } : null
+      emp.currentTurnMode = null
+      if (emp.remainingTurns <= 0) {
+        s.activePersistentArcana.emperor[pid] = null
+      }
     }
   }
 
-  // Draw chosen cards for both players
+  const tarotPlayers: string[] = []
   for (let i = 0; i < s.playerIds.length; i++) {
     const pid = s.playerIds[i]
     const pRec = s.playersRecord[pid]
     if (pRec.choice === 'classic') {
-      pRec.drawnClassic = drawFromClassicDeck(pRec, rng)
+      pRec.drawnClassic = drawFromClassicDeck(s, pid, rng)
       pRec.drawnTarot = null
       pRec.effectiveTarot = null
-      pRec.gasterRoll = null
     } else {
-      // Check 1/666 anomaly (3d10 rolling 6-6-6) before every Tarot draw
       const d10Roll: [number, number, number] =
-        options?.forceGasterRoll && i === 0
+        options?.forceGasterRoll && tarotPlayers.length === 0
           ? options.forceGasterRoll
           : [rollDie(10, rng) - 1, rollDie(10, rng) - 1, rollDie(10, rng) - 1]
       pRec.gasterRoll = d10Roll
@@ -977,16 +1337,55 @@ export function submitDrawChoice(
       if (d10Roll[0] === 6 && d10Roll[1] === 6 && d10Roll[2] === 6) {
         pRec.drawnTarot = 666
         pRec.effectiveTarot = 666
-        s.historyLog.unshift('ANOMALIE 666 ! 3d10 = 6-6-6 — W. D. Gaster surgit hors du paquet !')
+        s.historyLog.unshift('ANOMALIE 666 ! 3d10 = 6-6-6 — W. D. Gaster remplace l’Arcane !')
       } else {
-        const arcNum = drawFromTarotDeck(s, rng)
-        pRec.drawnTarot = arcNum
-        pRec.effectiveTarot = arcNum
+        const arc = drawFromTarotDeck(s, rng)
+        pRec.drawnTarot = arc
+        pRec.effectiveTarot = arc
       }
+      tarotPlayers.push(pid)
     }
   }
 
-  return advanceResolution(s, rng)
+  s.tarotDrawOrder = orderTarotDrawers(s, tarotPlayers, rng)
+  s.phase = 'INTERACTION'
+  s.presentationStep = 'CLASSIC_REVEAL'
+  s.pendingPrompts = []
+  s.currentTurnUserId = s.playerIds[0] ?? null
+  return s
+}
+
+export function advancePresentationStep(state: Arcane23State, rng: RngFn = Math.random): Arcane23State {
+  if (state.pendingPrompts.length > 0) return state
+  if (state.phase === 'FINISHED') return state
+
+  if (state.presentationStep === 'CLASSIC_REVEAL') {
+    if (state.tarotDrawOrder.length >= 1) {
+      return enterTarotSpotlight(state, 0, rng)
+    }
+    return resolveTurnStrictPriorities(state, rng)
+  }
+
+  if (state.presentationStep === 'TAROT_1') {
+    const firstActor = state.tarotDrawOrder[0]
+    const firstArc = firstActor ? state.playersRecord[firstActor]?.effectiveTarot : null
+    const devilEndedRound = firstArc === 15
+    const hermitCancelled = firstActor ? state.playersRecord[firstActor]?.ermiteCancelled : false
+    if (state.tarotDrawOrder.length >= 2 && !devilEndedRound && !hermitCancelled) {
+      return enterTarotSpotlight(state, 1, rng)
+    }
+    return resolveTurnStrictPriorities(state, rng)
+  }
+
+  if (state.presentationStep === 'TAROT_2') {
+    return resolveTurnStrictPriorities(state, rng)
+  }
+
+  if (state.presentationStep === 'RESOLVED' && state.phase === 'ROUND_END') {
+    return advanceToNextRound(state, rng)
+  }
+
+  return state
 }
 
 export function resolveArcanePrompt(
@@ -1005,29 +1404,34 @@ export function resolveArcanePrompt(
 
   switch (response.type) {
     case 'JUDGMENT_COPY_DISCARD': {
-      if (response.targetArcanum !== null && s.tarotDiscard.includes(response.targetArcanum)) {
-        rec.effectiveTarot = response.targetArcanum
-        s.historyLog.unshift(`XX. Le Jugement adopte l’effet de l’Arcane #${response.targetArcanum}.`)
-      } else {
-        rec.effectiveTarot = null
-        rec.judgmentBonusPower = 4
+      const target = response.targetArcanum
+      if (target !== null && s.tarotDiscard.includes(target) && target !== 20 && target !== 666) {
+        const idx = s.tarotDiscard.indexOf(target)
+        if (idx >= 0) s.tarotDiscard.splice(idx, 1)
+        rec.effectiveTarot = target
+        s.historyLog.unshift(`XX. Le Jugement réactive #${target} depuis la défausse !`)
+        // Insert copied Arcana into the exact current Tarot step WITHOUT skipping stages or drawing future cards
+        return prepareSingleTarotStepPrompts(s, playerId, rng)
       }
-      return advanceResolution(s, rng)
+      rec.effectiveTarot = null
+      rec.tarotStepResolved = true
+      return s
     }
 
     case 'GASTER_CHOOSE_WINNER': {
       const [p0, p1] = s.playerIds
       const chosen = s.playerIds.includes(response.chosenWinnerId) ? response.chosenWinnerId : playerId
-      s.historyLog.unshift(`666. Gaster tranche l’anomalie : victoire immédiate pour ce joueur !`)
-      return completeRoundOutcome(s, {
+      rec.tarotStepResolved = true
+      s.historyLog.unshift('666. Gaster décrète la victoire finale immédiate !')
+      return finalizeRoundOutcome(s, {
         winnerId: chosen,
-        reason: '666. Gaster (1/666) décrète unilatéralement le vainqueur de la manche.',
-        cancelled: false,
-        usedGaster: true,
+        reason: '666. W. D. Gaster (1/666) désigne le vainqueur de la partie !',
         pointsAwarded: {
           [p0]: chosen === p0 ? 1 : 0,
           [p1]: chosen === p1 ? 1 : 0,
         },
+        cancelled: false,
+        usedGaster: true,
       })
     }
 
@@ -1045,8 +1449,10 @@ export function resolveArcanePrompt(
       }
       rec.drawnClassic = chosen
       rec.classicDeck = [...orderedRest, ...rec.classicDeck]
-      s.historyLog.unshift('I. Le Bateleur choisit parmi les 3 premières cartes de son paquet.')
-      return advanceResolution(s, rng)
+      if (chosen) consumeSunRevealSlot(s, playerId, 1)
+      rec.tarotStepResolved = true
+      s.historyLog.unshift('I. Le Bateleur choisit sa carte et replace les 2 autres.')
+      return s
     }
 
     case 'PAPESSE_REORDER_OPPONENT': {
@@ -1062,114 +1468,93 @@ export function resolveArcanePrompt(
         if (!reordered.some((o) => o.id === c.id)) reordered.push(c)
       }
       oppRec.classicDeck = [...reordered, ...oppRec.classicDeck]
-      rec.effectiveTarot = null
-      ensureBaseClassicDraw(rec, rng)
-      s.historyLog.unshift('II. La Papesse réorganise le sommet du paquet adverse.')
-      return advanceResolution(s, rng)
+      s.activePersistentArcana.papesse = {
+        ownerId: playerId,
+        targetId: oppId,
+        remainingDraws: Math.min(3, reordered.length),
+      }
+      rec.tarotStepResolved = true
+      s.historyLog.unshift('II. La Papesse réordonne les 3 premières cartes du deck adverse.')
+      return s
     }
 
     case 'ERMITE_DECIDE': {
-      const [p0, p1] = s.playerIds
       if (response.decision === 'cancel') {
         rec.ermiteCancelled = true
-        s.historyLog.unshift('IX. L’Ermite consulte sa carte secrète et annule la manche.')
-        return completeRoundOutcome(s, {
-          winnerId: null,
-          reason: 'IX. L’Ermite a choisi d’annuler la manche après consultation.',
-          cancelled: true,
-          pointsAwarded: { [p0]: 0, [p1]: 0 },
-        })
+        rec.tarotStepResolved = true
+        s.historyLog.unshift('IX. L’Ermite observe le jeu et décide d’annuler la manche.')
+      } else {
+        rec.tarotStepResolved = true
+        s.historyLog.unshift('IX. L’Ermite choisit de disputer la manche.')
       }
-      rec.effectiveTarot = null
-      s.historyLog.unshift('IX. L’Ermite accepte le duel avec sa carte.')
-      return advanceResolution(s, rng)
+      return s
     }
 
     case 'FORCE_SACRIFICE': {
       if (response.sacrifice && rec.score >= 1) {
         rec.score -= 1
         rec.forceJokerSecured = true
-        s.historyLog.unshift('XI. La Force sacrifie 1 manche gagnée pour invoquer un Joker imbattable.')
+        s.historyLog.unshift('XI. La Force sacrifie 1 manche gagnée : carte transformée en Joker !')
       } else {
-        rec.effectiveTarot = null
-        ensureBaseClassicDraw(rec, rng)
-        s.historyLog.unshift('XI. La Force conserve ses manches et pioche normalement.')
+        s.historyLog.unshift('XI. La Force conserve ses manches gagnées.')
       }
-      return advanceResolution(s, rng)
+      rec.tarotStepResolved = true
+      return s
     }
 
     case 'WHEEL_CALL_COIN': {
-      const [p0, p1] = s.playerIds
       const result = flipCoin(rng)
       const ownerId =
         currentPrompt.type === 'WHEEL_CALL_COIN' ? currentPrompt.ownerId : getOpponentId(s, playerId)
-      const roundWinner = result === response.call ? playerId : ownerId
+      const winnerId = result === response.call ? playerId : ownerId
+      s.playersRecord[ownerId].tarotStepResolved = true
+      s.pendingWheelFlip = { callerId: playerId, call: response.call, result, winnerId }
       s.historyLog.unshift(
-        `X. La Roue de la Fortune : ${response.call === 'heads' ? 'Face' : 'Pile'} → ${result === 'heads' ? 'Face' : 'Pile'} (+2 manches) !`,
+        `X. La Roue de la Fortune (${result === 'heads' ? 'Face' : 'Pile'}) : +2 manches pour le gagnant du lancer !`,
       )
-      return completeRoundOutcome(s, {
-        winnerId: roundWinner,
-        reason: `X. La Roue de la Fortune (${result === 'heads' ? 'Face' : 'Pile'}) attribue +2 manches !`,
-        cancelled: false,
-        pointsAwarded: {
-          [p0]: roundWinner === p0 ? 2 : 0,
-          [p1]: roundWinner === p1 ? 2 : 0,
-        },
-        wheelFlip: {
-          callerId: playerId,
-          call: response.call,
-          result,
-          winnerId: roundWinner,
-        },
-      })
+      return s
     }
 
     case 'STAR_PICK_NUMBER': {
-      const target = Math.max(2, Math.min(10, Math.round(response.number)))
+      const num = Math.max(2, Math.min(10, Math.round(response.number)))
       s.activePersistentArcana.star[playerId] = {
-        targetNumber: target,
+        targetNumber: num,
         remainingTurns: 2,
+        activatedRound: s.roundNumber,
       }
-      s.historyLog.unshift(`XVII. L’Étoile bénit le chiffre ${target} pour les 2 prochains tours.`)
-      break
+      rec.tarotStepResolved = true
+      s.historyLog.unshift(`XVII. L’Étoile surveille le chiffre ${num} pour les 2 prochains tours.`)
+      return s
     }
 
     case 'EMPEROR_CHOOSE_LOCK': {
       const oppId = getOpponentId(s, playerId)
-      s.activePersistentArcana.emperor[oppId] = {
-        mode: response.mode,
-        remainingTurns: 2,
-        ownerId: playerId,
+      const emp = s.activePersistentArcana.emperor[oppId]
+      if (emp) {
+        emp.currentTurnMode = response.mode
+        emp.remainingTurns = Math.max(0, emp.remainingTurns - 1)
       }
       s.historyLog.unshift(
-        `IV. L’Empereur décrète : ${response.mode === 'force_tarot' ? 'Tarot obligatoire' : 'Tarot interdit'} pour 2 tours.`,
+        `IV. L’Empereur décrète pour ce tour : ${response.mode === 'force_tarot' ? 'Tarot imposé' : 'Tarot interdit'} à l’adversaire.`,
       )
-      break
+      if (s.pendingPrompts.length > 0) {
+        s.phase = 'INTERACTION'
+        s.presentationStep = 'EMPEROR_CHOICE'
+        s.currentTurnUserId = s.pendingPrompts[0].playerId
+      } else {
+        s.phase = 'CHOOSING'
+        s.presentationStep = 'CHOOSING'
+        s.currentTurnUserId = s.playerIds[0] ?? null
+      }
+      return s
     }
   }
-
-  if (s.pendingPrompts.length > 0) {
-    s.phase = 'INTERACTION'
-    s.currentTurnUserId = s.pendingPrompts[0].playerId
-    return s
-  }
-
-  const finalWinner = s.playerIds.find((pid) => s.playersRecord[pid].score >= s.targetRoundsToWin) ?? null
-  if (finalWinner) {
-    s.winnerId = finalWinner
-    s.status = 'finished'
-    s.phase = 'FINISHED'
-    s.currentTurnUserId = null
-  } else {
-    s.phase = 'ROUND_END'
-    s.currentTurnUserId = s.playerIds[0] ?? null
-  }
-  return s
 }
 
 export function advanceToNextRound(state: Arcane23State, rng: RngFn = Math.random): Arcane23State {
   if (state.phase !== 'ROUND_END' || state.status === 'finished') return state
   const s = cloneState(state)
+  const diablePlayed = playerHasEffectiveTarot(s, 15).length > 0
 
   for (const pid of s.playerIds) {
     const rec = s.playersRecord[pid]
@@ -1181,50 +1566,83 @@ export function advanceToNextRound(state: Arcane23State, rng: RngFn = Math.rando
       rec.classicDiscard.push(rec.drawnClassicExtra)
       rec.drawnClassicExtra = null
     }
+
     if (rec.drawnTarot !== null && rec.drawnTarot !== 666) {
-      // Keep out persistent board arcana while active on the board
-      const isActiveStar = rec.drawnTarot === 17 && Boolean(s.activePersistentArcana.star[pid])
-      const isActiveEmp =
-        rec.drawnTarot === 4 &&
-        Object.values(s.activePersistentArcana.emperor).some((e) => e?.ownerId === pid)
-      const isActiveSun = rec.drawnTarot === 19 && s.activePersistentArcana.sun
-      const isActiveMoon = rec.drawnTarot === 18 && s.activePersistentArcana.moon
-      if (!isActiveStar && !isActiveEmp && !isActiveSun && !isActiveMoon) {
+      const isPersistentCorner =
+        (rec.drawnTarot === 18 && s.activePersistentArcana.moon) ||
+        (rec.drawnTarot === 19 && Boolean(s.activePersistentArcana.sun)) ||
+        (rec.drawnTarot === 17 && Boolean(s.activePersistentArcana.star[pid])) ||
+        (rec.drawnTarot === 4 &&
+          Object.values(s.activePersistentArcana.emperor).some(
+            (e) => e && e.ownerId === pid && e.remainingTurns > 0,
+          ))
+      if (!isPersistentCorner) {
         s.tarotDiscard.push(rec.drawnTarot)
       }
     }
 
-    // Cooldown applies if player drew Tarot this round unless 0. Le Mat waived it
-    rec.tarotCooldown = rec.choice === 'tarot' && !rec.noCooldownNextTurn
+    rec.tarotCooldown = diablePlayed ? false : rec.choice === 'tarot' && !rec.noCooldownNextTurn
     rec.noCooldownNextTurn = false
     rec.choice = null
+    rec.loversCappedSum = null
+    rec.chariotBonus = 0
     rec.drawnTarot = null
     rec.effectiveTarot = null
-    rec.judgmentBonusPower = 0
+    rec.tarotRevealed = false
+    rec.tarotStepResolved = false
     rec.gasterRoll = null
     rec.forceJokerSecured = false
-    rec.bustedDiable = false
     rec.ermiteCancelled = false
   }
 
-  // Ensure decks never stay empty when entering next round
   if (s.tarotDeck.length === 0 && s.tarotDiscard.length > 0) {
     s.tarotDeck = shuffleArray(s.tarotDiscard, rng)
     s.tarotDiscard = []
   }
 
   s.roundNumber += 1
-  s.phase = 'CHOOSING'
+  s.tarotDrawOrder = []
   s.roundOutcome = null
+  s.pendingWheelFlip = null
   s.pendingPrompts = []
-  s.currentTurnUserId = s.playerIds[0] ?? null
-  s.historyLog.unshift(`Manche ${s.roundNumber} — Faites votre choix en secret.`)
+
+  // Check if IV. L'Empereur triggers an EMPEROR_CHOICE prompt at the start of this turn
+  const emperorPrompts: Arcane23Prompt[] = []
+  for (const targetId of s.playerIds) {
+    const emp = s.activePersistentArcana.emperor[targetId]
+    if (emp) {
+      emp.currentTurnMode = null
+      if (emp.remainingTurns > 0) {
+        emperorPrompts.push({
+          id: `emperor-turn-${s.roundNumber}-${emp.ownerId}`,
+          type: 'EMPEROR_CHOOSE_LOCK',
+          playerId: emp.ownerId,
+          opponentId: targetId,
+          remainingTurns: emp.remainingTurns,
+        })
+      } else {
+        s.activePersistentArcana.emperor[targetId] = null
+      }
+    }
+  }
+
+  if (emperorPrompts.length > 0) {
+    s.phase = 'INTERACTION'
+    s.presentationStep = 'EMPEROR_CHOICE'
+    s.pendingPrompts = emperorPrompts
+    s.currentTurnUserId = emperorPrompts[0].playerId
+    s.historyLog.unshift(
+      `Manche ${s.roundNumber} — Décret de IV. L’Empereur avant le choix secret.`,
+    )
+  } else {
+    s.phase = 'CHOOSING'
+    s.presentationStep = 'CHOOSING'
+    s.currentTurnUserId = s.playerIds[0] ?? null
+    s.historyLog.unshift(`Manche ${s.roundNumber} — Faites votre choix en secret.`)
+  }
   return s
 }
 
-/**
- * Helper to pick an automatic response for solo/AI testing or Oracle opponent.
- */
 export function buildDefaultPromptResponse(prompt: Arcane23Prompt): Arcane23PromptResponse {
   switch (prompt.type) {
     case 'JUDGMENT_COPY_DISCARD':
@@ -1238,26 +1656,31 @@ export function buildDefaultPromptResponse(prompt: Arcane23Prompt): Arcane23Prom
       const sorted = [...prompt.topCards].sort(
         (a, b) => getClassicCardNumericValue(b) - getClassicCardNumericValue(a),
       )
-      const chosen = sorted[0]?.id ?? ''
-      const rest = sorted.slice(1).map((c) => c.id)
-      return { type: 'BATELEUR_PICK_ORDER', chosenCardId: chosen, remainingOrder: rest }
+      return {
+        type: 'BATELEUR_PICK_ORDER',
+        chosenCardId: sorted[0]?.id ?? '',
+        remainingOrder: sorted.slice(1).map((c) => c.id),
+      }
     }
-    case 'PAPESSE_REORDER_OPPONENT': {
-      const weakestFirst = [...prompt.topCards]
-        .sort((a, b) => getClassicCardNumericValue(a) - getClassicCardNumericValue(b))
-        .map((c) => c.id)
-      return { type: 'PAPESSE_REORDER_OPPONENT', orderedCardIds: weakestFirst }
-    }
+    case 'PAPESSE_REORDER_OPPONENT':
+      return {
+        type: 'PAPESSE_REORDER_OPPONENT',
+        orderedCardIds: [...prompt.topCards]
+          .sort((a, b) => getClassicCardNumericValue(a) - getClassicCardNumericValue(b))
+          .map((c) => c.id),
+      }
     case 'ERMITE_DECIDE': {
-      const val = getClassicCardNumericValue(prompt.peekedCard)
-      return { type: 'ERMITE_DECIDE', decision: val >= 8 ? 'play' : 'cancel' }
+      const oppVal = prompt.observedOpponentCard
+        ? getClassicCardNumericValue(prompt.observedOpponentCard)
+        : 7
+      return { type: 'ERMITE_DECIDE', decision: oppVal <= 11 ? 'play' : 'cancel' }
     }
     case 'FORCE_SACRIFICE':
       return { type: 'FORCE_SACRIFICE', sacrifice: prompt.currentScore >= 2 }
     case 'WHEEL_CALL_COIN':
       return { type: 'WHEEL_CALL_COIN', call: 'heads' }
     case 'STAR_PICK_NUMBER':
-      return { type: 'STAR_PICK_NUMBER', number: 10 }
+      return { type: 'STAR_PICK_NUMBER', number: 7 }
     case 'EMPEROR_CHOOSE_LOCK':
       return { type: 'EMPEROR_CHOOSE_LOCK', mode: 'forbid_tarot' }
   }

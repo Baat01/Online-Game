@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import * as THREE from 'three'
 import {
+  alignFaceToCamera,
   buildDieGeometryData,
   computeTargetDieQuaternion,
   computeCoinTargetQuaternion,
@@ -222,13 +223,33 @@ describe('deck & cardThemes', () => {
     } as const
 
     const zForward = new THREE.Vector3(0, 0, 1)
+    const yUp = new THREE.Vector3(0, 1, 0)
     for (const dieType of ['d4', 'd6', 'd8', 'd10', 'd10-tens', 'd12', 'd16', 'd20'] as const) {
       const { geometry, faces } = buildDieGeometryData(dieType)
       expect(faces).toHaveLength(expectedFaceCounts[dieType])
       for (const f of faces) {
         const q = computeTargetDieQuaternion(dieType, f.value)
-        const aligned = f.normal.clone().applyQuaternion(q)
-        expect(aligned.distanceTo(zForward)).toBeLessThan(1e-4)
+        const qExact = alignFaceToCamera(f.normal, f.up)
+        expect(q.angleTo(qExact)).toBeLessThan(1e-4)
+
+        const alignedNormal = f.normal.clone().applyQuaternion(q)
+        const alignedUp = f.up.clone().applyQuaternion(q)
+        expect(alignedNormal.distanceTo(zForward)).toBeLessThan(1e-4)
+        expect(alignedUp.distanceTo(yUp)).toBeLessThan(1e-4)
+      }
+
+      // Verify distortion-free bounded [0.04, 0.96] UV coordinates on d10, d10-tens, and d16
+      if (dieType === 'd10' || dieType === 'd10-tens' || dieType === 'd16') {
+        const uvAttr = geometry.getAttribute('uv')
+        expect(uvAttr.count).toBeGreaterThan(0)
+        for (let idx = 0; idx < uvAttr.count; idx++) {
+          const u = uvAttr.getX(idx)
+          const v = uvAttr.getY(idx)
+          expect(u).toBeGreaterThanOrEqual(0.039)
+          expect(u).toBeLessThanOrEqual(0.961)
+          expect(v).toBeGreaterThanOrEqual(0.039)
+          expect(v).toBeLessThanOrEqual(0.961)
+        }
       }
       geometry.dispose()
     }
